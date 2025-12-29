@@ -5,27 +5,40 @@
 
 import OpenAI from 'openai';
 import { preprocessSketch } from '../utils/imagePreprocess.js';
-import { AXON_PROMPT_V1, PROMPT_VERSION } from '../prompts/axonPrompt.js';
-import type { RenderResult } from '../types/render.js';
+import { getPromptForRenderType } from '../prompts/index.js';
+import type { RenderResult, RenderType } from '../types/render.js';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
 /**
- * Generates an axonometric concept image from a sketch
+ * Credit costs per render type
  */
-export async function generateAxonometricConcept(
-  sketchBuffer: Buffer
+export const CREDIT_COSTS: Record<RenderType, number> = {
+  axonometric: 25,
+  floor_plan: 15,
+  section: 15,
+};
+
+/**
+ * Generates a concept image from a sketch based on render type
+ */
+export async function generateConceptImage(
+  sketchBuffer: Buffer,
+  renderType: RenderType
 ): Promise<RenderResult> {
   // Preprocess sketch
   await preprocessSketch(sketchBuffer);
+
+  // Get prompt for render type
+  const { promptText, promptVersion } = getPromptForRenderType(renderType);
 
   // Call OpenAI image generation using DALL-E 3
   // Note: DALL-E 3 doesn't accept image inputs directly, so we use the prompt
   const response = await openai.images.generate({
     model: 'dall-e-3',
-    prompt: AXON_PROMPT_V1,
+    prompt: promptText,
     size: '1024x1024',
     response_format: 'b64_json',
     n: 1,
@@ -39,7 +52,8 @@ export async function generateAxonometricConcept(
   return {
     imageBase64: imageData.b64_json,
     model: 'dall-e-3',
-    promptVersion: PROMPT_VERSION,
+    promptVersion,
+    renderType,
   };
 }
 
