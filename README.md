@@ -8,7 +8,7 @@ The AI Render Service takes architectural sketch images as input and generates p
 
 - Accepts sketch images via HTTP POST
 - Preprocesses images (grayscale, contrast enhancement, resizing)
-- Uses OpenAI's DALL-E 3 model to generate axonometric drawings
+- Uses OpenAI's gpt-image-1 model to generate axonometric drawings
 - Applies Neave Brown-inspired styling with consistent line weights
 - Returns base64-encoded PNG images
 
@@ -64,13 +64,14 @@ npm run type-check
 
 ### Input
 
-- **Format:** Image file (PNG, JPEG, etc.)
+- **Format:** Image file (PNG, JPEG, GIF, WebP) or PDF
 - **Method:** HTTP POST with `multipart/form-data`
 - **Field name:** `image`
 - **Max size:** 10MB
 - **Content:** Architectural sketch or drawing
 
 The service will automatically:
+- If PDF: Convert first page to image
 - Convert to grayscale
 - Enhance contrast
 - Resize to 1024x1024 pixels
@@ -82,13 +83,13 @@ The service will automatically:
 ```json
 {
   "imageBase64": "iVBORw0KGgoAAAANSUhEUgAA...",
-  "model": "dall-e-3",
+  "model": "gpt-image-1",
   "promptVersion": "axon_v1"
 }
 ```
 
 - **imageBase64:** Base64-encoded PNG image (1024x1024)
-- **model:** AI model used for generation (`dall-e-3`)
+- **model:** AI model used for generation (`gpt-image-1`)
 - **promptVersion:** Prompt version identifier (`axon_v1`)
 
 The generated image will be:
@@ -106,17 +107,27 @@ The generated image will be:
 
 Upload an image to generate an axonometric concept rendering.
 
-**Example Request:**
+**Example Request (Image):**
 ```bash
 curl -X POST http://localhost:3001/render \
-  -F "image=@path/to/your/sketch.png"
+  -F "image=@path/to/your/sketch.png" \
+  -F "projectId=my-project" \
+  -F "renderType=axonometric"
+```
+
+**Example Request (PDF):**
+```bash
+curl -X POST http://localhost:3001/render \
+  -F "image=@path/to/your/sketch.pdf" \
+  -F "projectId=my-project" \
+  -F "renderType=axonometric"
 ```
 
 **Example Response:**
 ```json
 {
   "imageBase64": "iVBORw0KGgoAAAANSUhEUgAA...",
-  "model": "dall-e-3",
+  "model": "gpt-image-1",
   "promptVersion": "axon_v1"
 }
 ```
@@ -136,3 +147,83 @@ curl http://localhost:3001/health
 ```
 
 Returns: `{"status":"ok"}`
+
+## Deployment to Vercel
+
+This service is configured for deployment to Vercel as a serverless function.
+
+### Prerequisites
+
+- Vercel account (sign up at [vercel.com](https://vercel.com))
+- Vercel CLI (optional): `npm i -g vercel`
+- OpenAI API key
+
+### Environment Variables
+
+Set the following environment variables in your Vercel project:
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `OPENAI_API_KEY` | Yes | Your OpenAI API key for image generation |
+| `NODE_ENV` | No | Set to `production` for production deployments |
+
+### Deployment Steps
+
+1. **Install Vercel CLI** (optional, can also deploy via GitHub):
+   ```bash
+   npm i -g vercel
+   ```
+
+2. **Login to Vercel**:
+   ```bash
+   vercel login
+   ```
+
+3. **Deploy to Vercel**:
+   ```bash
+   # From the project root
+   vercel
+   ```
+   
+   Or deploy via GitHub:
+   - Push your code to GitHub
+   - Import the repository in Vercel dashboard
+   - Vercel will automatically detect the configuration
+
+4. **Set Environment Variables**:
+   ```bash
+   # Via CLI
+   vercel env add OPENAI_API_KEY
+   # Enter your API key when prompted
+   
+   # Or via Vercel Dashboard:
+   # Project Settings > Environment Variables > Add
+   ```
+
+5. **Deploy to Production**:
+   ```bash
+   vercel --prod
+   ```
+
+### Configuration
+
+The service uses `vercel.json` for configuration:
+- **API Directory Pattern**: Uses modern `api/[...].ts` catch-all route
+- **Runtime**: `@vercel/node` for Express app compatibility
+- **Function Timeout**: 60 seconds (can be extended with Vercel Pro)
+- **Routes**: All routes (`/health`, `/api/*`, `/render`) are handled by the Express app via the catch-all route
+
+### API Endpoints on Vercel
+
+After deployment, your endpoints will be available at:
+- `https://your-project.vercel.app/health`
+- `https://your-project.vercel.app/api/geocode`
+- `https://your-project.vercel.app/api/infer-existing-context`
+- `https://your-project.vercel.app/api/build-site-context`
+- `https://your-project.vercel.app/render`
+
+### Notes
+
+- **Timeout Limits**: Vercel Free tier has a 10-second timeout for serverless functions. Vercel Pro allows up to 60 seconds (configured in `vercel.json`).
+- **Cold Starts**: Serverless functions may have cold start delays on first request.
+- **Environment Variables**: Make sure to set `OPENAI_API_KEY` in your Vercel project settings for all environments (development, preview, production).

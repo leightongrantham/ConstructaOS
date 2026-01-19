@@ -5,3 +5,6 @@ dist/
 .env
 .env.local
 *.tsbuildinfo
+.vercel
+.env*.local
+.concepts/
