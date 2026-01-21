@@ -269,32 +269,9 @@
     <h1>AI Render Service</h1>
     <p class="subtitle">Generate architectural renderings from sketches</p>
 
-    <!-- Concept Workflow Test Section -->
     <div class="section-divider"></div>
-    <h2 class="section-title">Concept Workflow (Test)</h2>
-    
-    <div style="margin-bottom: 20px;">
-      <button type="button" id="create-concept-btn" style="width: auto; display: block; margin-bottom: 10px;">Create Concept (Axon)</button>
-      <button type="button" id="generate-plan-btn" style="width: auto; display: block; margin-bottom: 10px;" disabled>Generate Plan (from same concept)</button>
-      <button type="button" id="generate-section-btn" style="width: auto; display: block; margin-bottom: 10px;" disabled>Generate Section (from same concept)</button>
-    </div>
-
-    <div id="concept-status" class="status"></div>
-
-    <div id="concept-result-container" style="margin-top: 20px; display: none;">
-      <h3>Concept Results</h3>
-      <div id="concept-axon-container" style="margin-bottom: 20px;"></div>
-      <div id="concept-plan-container" style="margin-bottom: 20px;"></div>
-      <div id="concept-section-container" style="margin-bottom: 20px;"></div>
-      
-      <div style="margin-top: 20px; padding: 15px; background: #f9f9f9; border: 1px solid #e0e0e0; border-radius: 4px;">
-        <h4 style="margin-bottom: 10px;">Concept Seed (Debug)</h4>
-        <pre id="concept-seed-json" style="font-family: 'Monaco', 'Menlo', 'Courier New', monospace; font-size: 12px; white-space: pre-wrap; word-wrap: break-word; margin: 0; padding: 10px; background: white; border: 1px solid #ddd; border-radius: 4px; max-height: 400px; overflow-y: auto;"></pre>
-      </div>
-    </div>
-
-    <div class="section-divider"></div>
-    <h2 class="section-title">Standard Render Form</h2>
+    <h2 class="section-title">Generate Concept Renders</h2>
+    <p style="color: #666; margin-bottom: 20px;">Create architectural concept views with consistent design across axonometric, plan, and section views.</p>
 
     <div class="form-group" style="margin-bottom: 20px; padding: 15px; background: #f0f0f0; border-radius: 4px;">
       <label for="preset-select" style="font-weight: 600;">Quick Presets (for rapid iteration)</label>
@@ -311,21 +288,7 @@
     <form id="render-form">
       <div class="form-group">
         <label for="projectId">Project ID *</label>
-        <input type="text" id="projectId" name="projectId" required placeholder="Enter project ID">
-      </div>
-
-      <div class="form-group">
-        <label>Render Mode *</label>
-        <div class="radio-group">
-          <div class="radio-option">
-            <input type="radio" id="mode-structured" name="renderMode" value="structured" checked>
-            <label for="mode-structured">Structured inputs only</label>
-          </div>
-          <div class="radio-option">
-            <input type="radio" id="mode-structured-sketch" name="renderMode" value="structured-sketch">
-            <label for="mode-structured-sketch">Structured inputs + sketch</label>
-          </div>
-        </div>
+        <input type="text" id="projectId" name="projectId" required placeholder="Enter project ID" value="test-project-123">
       </div>
 
       <div class="section-divider" id="existing-building-section"></div>
@@ -610,11 +573,6 @@
 
       <div class="section-divider"></div>
 
-      <div class="form-group" id="sketch-upload-group">
-        <label for="image">Sketch Image or PDF *</label>
-        <input type="file" id="image" name="image" accept="image/*,.pdf">
-      </div>
-
       <button type="submit" id="submit-btn">Generate Rendering</button>
     </form>
 
@@ -641,19 +599,14 @@
         <div id="result-concept-id" style="display: none;"><strong>Concept ID:</strong> <span id="result-concept-id-value"></span></div>
       </div>
 
-      <!-- Concept workflow actions (shown when concept is created) -->
-      <div id="render-concept-actions" style="margin-top: 20px; padding: 15px; background: #f0f0f0; border-radius: 4px; display: none;">
-        <h4 style="margin-bottom: 10px;">Generate Additional Views from This Concept</h4>
+      <!-- Generate additional views (shown after axon is created) -->
+      <div id="render-concept-actions" style="margin-top: 20px; padding: 15px; background: #e8f5e9; border-left: 4px solid #4caf50; border-radius: 4px; display: none;">
+        <h4 style="margin: 0 0 10px 0; color: #2e7d32;">✓ Concept Created - Generate Correlated Views</h4>
+        <p style="margin: 0 0 15px 0; font-size: 14px; color: #2e7d32;">Generate plan and section views using the same concept seed for consistency.</p>
         <button type="button" id="render-generate-plan-btn" style="width: auto; display: inline-block; margin-right: 10px; margin-bottom: 10px;">Generate Plan</button>
         <button type="button" id="render-generate-section-btn" style="width: auto; display: inline-block; margin-bottom: 10px;">Generate Section</button>
         <div id="render-plan-result" style="margin-top: 15px;"></div>
         <div id="render-section-result" style="margin-top: 15px;"></div>
-      </div>
-
-      <!-- Concept Seed Debug Panel -->
-      <div id="render-concept-seed-panel" style="margin-top: 20px; padding: 15px; background: #f9f9f9; border: 1px solid #e0e0e0; border-radius: 4px; display: none;">
-        <h4 style="margin-bottom: 10px;">Concept Seed (Debug)</h4>
-        <pre id="render-concept-seed-json" style="font-family: 'Monaco', 'Menlo', 'Courier New', monospace; font-size: 12px; white-space: pre-wrap; word-wrap: break-word; margin: 0; padding: 10px; background: white; border: 1px solid #ddd; border-radius: 4px; max-height: 400px; overflow-y: auto;"></pre>
       </div>
     </div>
   </div>
@@ -697,21 +650,9 @@
       API_URL: API_URL || '(same origin)' 
     });
 
-    // Concept workflow elements
-    const createConceptBtn = document.getElementById('create-concept-btn');
-    const generatePlanBtn = document.getElementById('generate-plan-btn');
-    const generateSectionBtn = document.getElementById('generate-section-btn');
-    const conceptStatus = document.getElementById('concept-status');
-    const conceptResultContainer = document.getElementById('concept-result-container');
-    const conceptAxonContainer = document.getElementById('concept-axon-container');
-    const conceptPlanContainer = document.getElementById('concept-plan-container');
-    const conceptSectionContainer = document.getElementById('concept-section-container');
-    const conceptSeedJson = document.getElementById('concept-seed-json');
-    
     // Store current concept state
     let currentConceptId = null;
     let currentProjectId = null;
-    let currentConceptSeed = null;
 
     // Site location elements
     const addressInput = document.getElementById('address');
@@ -723,29 +664,7 @@
     let siteContextSummary = null;
     let geocodeResult = null;
 
-    const sketchUploadGroup = document.getElementById('sketch-upload-group');
-    const imageInput = document.getElementById('image');
-    const renderModeRadios = document.querySelectorAll('input[name="renderMode"]');
-
-    // Initialize sketch upload visibility based on default mode
-    function updateSketchUploadVisibility() {
-      const selectedMode = document.querySelector('input[name="renderMode"]:checked').value;
-      if (selectedMode === 'structured') {
-        sketchUploadGroup.classList.add('hidden');
-        imageInput.removeAttribute('required');
-      } else {
-        sketchUploadGroup.classList.remove('hidden');
-        imageInput.setAttribute('required', 'required');
-      }
-    }
-
-    // Listen for render mode changes
-    renderModeRadios.forEach(radio => {
-      radio.addEventListener('change', updateSketchUploadVisibility);
-    });
-
-    // Initialize on page load
-    updateSketchUploadVisibility();
+    // No additional initialization needed
 
     // Preset scenarios
     const presetSelect = document.getElementById('preset-select');
@@ -1280,54 +1199,28 @@
     }
 
     function showResult(data) {
-      // Display prompt text if available
-      if (data.promptText) {
-        promptText.textContent = data.promptText;
-        promptContent.classList.add('show');
-        promptToggle.classList.add('expanded');
-      } else {
-        promptText.textContent = 'Prompt text not available';
-        promptContent.classList.remove('show');
-        promptToggle.classList.remove('expanded');
-      }
+      // Hide prompt section (not available in new API)
+      promptContent.classList.remove('show');
+      promptToggle.classList.remove('expanded');
 
       // Display rendered image
-      resultImage.src = `data:image/png;base64,${data.imageBase64}`;
-      resultModel.textContent = data.model;
+      resultImage.src = data.imageUrl;
       resultPromptVersion.textContent = data.promptVersion;
-      // Format outputType for display
-      let outputTypeDisplay = 'N/A';
-      if (data.outputType) {
-        outputTypeDisplay = data.outputType
-          .replace('concept_', '')
-          .replace(/_/g, ' ')
-          .replace(/\b\w/g, l => l.toUpperCase());
-      } else if (data.renderType) {
-        outputTypeDisplay = data.renderType.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+      
+      // Format renderType for display
+      let renderTypeDisplay = 'N/A';
+      if (data.renderType) {
+        renderTypeDisplay = data.renderType.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
       }
-      resultRenderType.textContent = outputTypeDisplay;
+      resultRenderType.textContent = renderTypeDisplay;
 
-      // Handle concept seed integration
+      // Show concept ID
       if (data.conceptId) {
-        // Update global concept state
-        currentConceptId = data.conceptId;
-        currentProjectId = data.projectId || 'default';
-        if (data.conceptSeed) {
-          currentConceptSeed = data.conceptSeed;
-        }
-
-        // Show concept ID
         resultConceptIdValue.textContent = data.conceptId;
         resultConceptId.style.display = 'block';
 
-        // Show concept seed in debug panel
-        if (data.conceptSeed) {
-          renderConceptSeedJson.textContent = JSON.stringify(data.conceptSeed, null, 2);
-          renderConceptSeedPanel.style.display = 'block';
-        }
-
         // If axonometric output, enable plan/section generation
-        if (data.outputType === 'concept_axonometric') {
+        if (data.renderType === 'axonometric') {
           renderConceptActions.style.display = 'block';
           renderGeneratePlanBtn.disabled = false;
           renderGenerateSectionBtn.disabled = false;
@@ -1335,14 +1228,13 @@
           renderPlanResult.innerHTML = '';
           renderSectionResult.innerHTML = '';
         } else {
-          // For plan/section outputs, hide the actions (can't generate from themselves)
+          // For plan/section outputs, hide the actions
           renderConceptActions.style.display = 'none';
         }
       } else {
         // No concept ID - hide concept-related UI
         resultConceptId.style.display = 'none';
         renderConceptActions.style.display = 'none';
-        renderConceptSeedPanel.style.display = 'none';
       }
 
       resultContainer.classList.add('show');
@@ -1365,323 +1257,184 @@
       conceptStatus.className = 'status';
     }
 
-    // Create Concept (Axon) handler
-    createConceptBtn.addEventListener('click', async () => {
-      createConceptBtn.disabled = true;
-      hideConceptStatus();
-      showConceptStatus('Creating concept (axon)...', 'info');
-
-      // Build ConceptBrief from form (minimal required fields)
-      const projectId = document.getElementById('projectId').value || 'default';
-      const projectType = document.getElementById('projectType').value || 'new_build';
-      const buildingForm = document.getElementById('buildingForm').value || 'detached';
-      const storeys = document.getElementById('storeys').value || 'two';
-      const numberOfPlots = document.getElementById('numberOfPlots').value || 'one';
-      const floorAreaRange = document.getElementById('floorAreaRange').value || '100_150';
-      const bedrooms = document.getElementById('bedrooms').value || 'two';
-      const bathrooms = document.getElementById('bathrooms').value || 'one';
-      const kitchenType = document.getElementById('kitchenType').value || 'open_plan';
-      const livingSpaces = document.getElementById('livingSpaces').value || 'single_main_space';
-      const roofType = document.getElementById('roofType').value || 'flat';
-      const massingPreference = document.getElementById('massingPreference').value || 'simple_compact';
-
-      const conceptBrief = {
-        proposedDesign: {
-          projectType,
-          buildingForm,
-          storeys,
-          numberOfPlots,
-          floorAreaRange,
-          bedrooms,
-          bathrooms,
-          kitchenType,
-          livingSpaces,
-          roofType,
-          massingPreference,
-          outputType: 'concept_axonometric',
-        },
+    // Helper function to call /api/render for additional views
+    async function callApiRender(renderType, projectId, conceptId, conceptBrief) {
+      const payload = {
+        projectId: projectId,
+        renderType: renderType,
+        conceptInputs: conceptBrief,
+        conceptId: conceptId,
       };
 
-      try {
-        const response = await fetch(`${API_URL}/test/concept/create`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            projectId,
-            conceptInputs: conceptBrief,
-          }),
-        });
+      const response = await fetch(`${API_URL}/api/render`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
 
-        if (!response.ok) {
-          const contentType = response.headers.get('content-type');
-          let errorMessage = `HTTP error! status: ${response.status}`;
-          if (contentType && contentType.includes('application/json')) {
-            const error = await response.json();
-            errorMessage = error.error || error.message || errorMessage;
-          } else {
-            const text = await response.text();
-            if (text.includes('<!DOCTYPE') || text.includes('<html')) {
-              errorMessage = `Server returned HTML instead of JSON. Check if server is running at ${API_URL}`;
-            } else {
-              errorMessage = text || errorMessage;
-            }
-          }
-          throw new Error(errorMessage);
+      if (!response.ok) {
+        const contentType = response.headers.get('content-type');
+        let errorData = null;
+        if (contentType && contentType.includes('application/json')) {
+          errorData = await response.json();
         }
-
-        const data = await response.json();
-        currentConceptId = data.conceptId;
-        currentProjectId = data.projectId;
-        currentConceptSeed = data.conceptSeed;
-
-        // Display axon image
-        conceptAxonContainer.innerHTML = `
-          <h4>Axonometric View</h4>
-          <img src="${data.axonImageUrl}" alt="Axonometric concept" style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px;">
-        `;
-
-        // Display concept seed JSON
-        conceptSeedJson.textContent = JSON.stringify(data.conceptSeed, null, 2);
-
-        // Show result container
-        conceptResultContainer.style.display = 'block';
-
-        // Enable plan and section buttons
-        generatePlanBtn.disabled = false;
-        generateSectionBtn.disabled = false;
-
-        showConceptStatus('Concept created successfully!', 'success');
-      } catch (error) {
-        console.error('Error creating concept:', error);
-        showConceptStatus(`Error: ${error.message}`, 'error');
-      } finally {
-        createConceptBtn.disabled = false;
-      }
-    });
-
-    // Generate Plan handler
-    generatePlanBtn.addEventListener('click', async () => {
-      if (!currentConceptId || !currentProjectId) {
-        showConceptStatus('Please create a concept first', 'error');
-        return;
+        throw { status: response.status, data: errorData };
       }
 
-      generatePlanBtn.disabled = true;
-      showConceptStatus('Generating plan...', 'info');
+      return await response.json();
+    }
 
-      try {
-        const response = await fetch(`${API_URL}/test/concept/plan`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            projectId: currentProjectId,
-            conceptId: currentConceptId,
-          }),
-        });
-
-        if (!response.ok) {
-          const contentType = response.headers.get('content-type');
-          let errorMessage = `HTTP error! status: ${response.status}`;
-          if (contentType && contentType.includes('application/json')) {
-            const error = await response.json();
-            errorMessage = error.error || error.message || errorMessage;
-          } else {
-            const text = await response.text();
-            if (text.includes('<!DOCTYPE') || text.includes('<html')) {
-              errorMessage = `Server returned HTML instead of JSON. Check if server is running at ${API_URL}`;
-            } else {
-              errorMessage = text || errorMessage;
-            }
-          }
-          throw new Error(errorMessage);
-        }
-
-        const data = await response.json();
-
-        // Display plan image
-        conceptPlanContainer.innerHTML = `
-          <h4>Plan View</h4>
-          <img src="${data.planImageUrl}" alt="Plan view" style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px;">
-        `;
-
-        showConceptStatus('Plan generated successfully!', 'success');
-      } catch (error) {
-        console.error('Error generating plan:', error);
-        showConceptStatus(`Error: ${error.message}`, 'error');
-      } finally {
-        generatePlanBtn.disabled = false;
-      }
-    });
-
-    // Generate Section handler
-    generateSectionBtn.addEventListener('click', async () => {
-      if (!currentConceptId || !currentProjectId) {
-        showConceptStatus('Please create a concept first', 'error');
-        return;
-      }
-
-      generateSectionBtn.disabled = true;
-      showConceptStatus('Generating section...', 'info');
-
-      try {
-        const response = await fetch(`${API_URL}/test/concept/section`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            projectId: currentProjectId,
-            conceptId: currentConceptId,
-          }),
-        });
-
-        if (!response.ok) {
-          const contentType = response.headers.get('content-type');
-          let errorMessage = `HTTP error! status: ${response.status}`;
-          if (contentType && contentType.includes('application/json')) {
-            const error = await response.json();
-            errorMessage = error.error || error.message || errorMessage;
-          } else {
-            const text = await response.text();
-            if (text.includes('<!DOCTYPE') || text.includes('<html')) {
-              errorMessage = `Server returned HTML instead of JSON. Check if server is running at ${API_URL}`;
-            } else {
-              errorMessage = text || errorMessage;
-            }
-          }
-          throw new Error(errorMessage);
-        }
-
-        const data = await response.json();
-
-        // Display section image
-        conceptSectionContainer.innerHTML = `
-          <h4>Section View</h4>
-          <img src="${data.sectionImageUrl}" alt="Section view" style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px;">
-        `;
-
-        showConceptStatus('Section generated successfully!', 'success');
-      } catch (error) {
-        console.error('Error generating section:', error);
-        showConceptStatus(`Error: ${error.message}`, 'error');
-      } finally {
-        generateSectionBtn.disabled = false;
-      }
-    });
-
-    // Render workflow: Generate Plan handler (integrated with standard render form)
+    // Generate Plan from current concept
     renderGeneratePlanBtn.addEventListener('click', async () => {
       if (!currentConceptId || !currentProjectId) {
-        showStatus('Please generate an axonometric view first to create a concept', 'error');
+        showStatus('Please generate an axonometric view first', 'error');
         return;
+      }
+
+      // Get the concept brief from the form
+      const submitProjectType = document.getElementById('projectType').value;
+      const submitIsNewBuild = submitProjectType === 'new_build';
+
+      const proposedDesign = {
+        projectType: submitProjectType,
+        buildingForm: document.getElementById('buildingForm').value,
+        storeys: document.getElementById('storeys').value,
+        numberOfPlots: document.getElementById('numberOfPlots').value,
+        bedrooms: document.getElementById('bedrooms').value,
+        bathrooms: document.getElementById('bathrooms').value,
+        kitchenType: document.getElementById('kitchenType').value,
+        livingSpaces: document.getElementById('livingSpaces').value,
+        roofType: document.getElementById('roofType').value,
+        massingPreference: document.getElementById('massingPreference').value,
+        outputType: 'concept_plan',
+      };
+
+      // Add project type-specific fields
+      if (submitProjectType === 'new_build') {
+        proposedDesign.totalFloorAreaRange = document.getElementById('totalFloorAreaRange').value;
+      } else if (submitProjectType === 'extension') {
+        proposedDesign.extensionType = document.getElementById('extensionType').value;
+        proposedDesign.additionalFloorAreaRange = document.getElementById('additionalFloorAreaRange').value;
+      } else if (submitProjectType === 'renovation') {
+        proposedDesign.renovationScope = document.getElementById('renovationScope').value;
+      } else if (submitProjectType === 'conversion') {
+        proposedDesign.floorAreaRange = document.getElementById('floorAreaRange').value;
+      }
+
+      const conceptBrief = { proposedDesign };
+
+      if (!submitIsNewBuild) {
+        const existingBuildingForm = document.getElementById('existingBuildingForm').value;
+        if (existingBuildingForm) {
+          conceptBrief.existingContext = { buildingForm: existingBuildingForm };
+        }
       }
 
       renderGeneratePlanBtn.disabled = true;
       renderPlanResult.innerHTML = '<p style="color: #666;">Generating plan...</p>';
 
       try {
-        const response = await fetch(`${API_URL}/test/concept/plan`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            projectId: currentProjectId,
-            conceptId: currentConceptId,
-          }),
-        });
+        const data = await callApiRender('floor_plan', currentProjectId, currentConceptId, conceptBrief);
 
-        if (!response.ok) {
-          const contentType = response.headers.get('content-type');
-          let errorMessage = `HTTP error! status: ${response.status}`;
-          if (contentType && contentType.includes('application/json')) {
-            const error = await response.json();
-            errorMessage = error.error || error.message || errorMessage;
-          } else {
-            const text = await response.text();
-            if (text.includes('<!DOCTYPE') || text.includes('<html')) {
-              errorMessage = `Server returned HTML instead of JSON. Check if server is running at ${API_URL}`;
-            } else {
-              errorMessage = text || errorMessage;
-            }
-          }
-          throw new Error(errorMessage);
-        }
-
-        const data = await response.json();
-
-        // Display plan image in render result container
         renderPlanResult.innerHTML = `
           <h4 style="margin-bottom: 10px;">Plan View</h4>
-          <img src="${data.planImageUrl}" alt="Plan view" style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px;">
+          <img src="${data.imageUrl}" alt="Plan view" style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px;">
+          <p style="margin: 5px 0 0 0; font-size: 12px; color: #666;">v${data.promptVersion}</p>
         `;
 
         showStatus('Plan generated successfully!', 'success');
       } catch (error) {
         console.error('Error generating plan:', error);
-        renderPlanResult.innerHTML = `<p style="color: #f44336;">Error: ${error.message}</p>`;
-        showStatus(`Error: ${error.message}`, 'error');
+        
+        if (error.status === 409 && error.data?.error === 'AXON_REQUIRED') {
+          renderPlanResult.innerHTML = `
+            <div style="padding: 15px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 4px;">
+              <p style="margin: 0; color: #856404; font-weight: 600;">⚠️ Axon Required</p>
+              <p style="margin: 8px 0 0 0; font-size: 13px; color: #856404;">${error.data.message}</p>
+            </div>
+          `;
+        } else {
+          renderPlanResult.innerHTML = `<p style="color: #f44336;">Error: ${error.data?.message || error.message || 'Failed to generate plan'}</p>`;
+        }
       } finally {
         renderGeneratePlanBtn.disabled = false;
       }
     });
 
-    // Render workflow: Generate Section handler (integrated with standard render form)
+    // Generate Section from current concept
     renderGenerateSectionBtn.addEventListener('click', async () => {
       if (!currentConceptId || !currentProjectId) {
-        showStatus('Please generate an axonometric view first to create a concept', 'error');
+        showStatus('Please generate an axonometric view first', 'error');
         return;
+      }
+
+      // Get the concept brief from the form
+      const submitProjectType = document.getElementById('projectType').value;
+      const submitIsNewBuild = submitProjectType === 'new_build';
+
+      const proposedDesign = {
+        projectType: submitProjectType,
+        buildingForm: document.getElementById('buildingForm').value,
+        storeys: document.getElementById('storeys').value,
+        numberOfPlots: document.getElementById('numberOfPlots').value,
+        bedrooms: document.getElementById('bedrooms').value,
+        bathrooms: document.getElementById('bathrooms').value,
+        kitchenType: document.getElementById('kitchenType').value,
+        livingSpaces: document.getElementById('livingSpaces').value,
+        roofType: document.getElementById('roofType').value,
+        massingPreference: document.getElementById('massingPreference').value,
+        outputType: 'concept_section',
+      };
+
+      // Add project type-specific fields
+      if (submitProjectType === 'new_build') {
+        proposedDesign.totalFloorAreaRange = document.getElementById('totalFloorAreaRange').value;
+      } else if (submitProjectType === 'extension') {
+        proposedDesign.extensionType = document.getElementById('extensionType').value;
+        proposedDesign.additionalFloorAreaRange = document.getElementById('additionalFloorAreaRange').value;
+      } else if (submitProjectType === 'renovation') {
+        proposedDesign.renovationScope = document.getElementById('renovationScope').value;
+      } else if (submitProjectType === 'conversion') {
+        proposedDesign.floorAreaRange = document.getElementById('floorAreaRange').value;
+      }
+
+      const conceptBrief = { proposedDesign };
+
+      if (!submitIsNewBuild) {
+        const existingBuildingForm = document.getElementById('existingBuildingForm').value;
+        if (existingBuildingForm) {
+          conceptBrief.existingContext = { buildingForm: existingBuildingForm };
+        }
       }
 
       renderGenerateSectionBtn.disabled = true;
       renderSectionResult.innerHTML = '<p style="color: #666;">Generating section...</p>';
 
       try {
-        const response = await fetch(`${API_URL}/test/concept/section`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            projectId: currentProjectId,
-            conceptId: currentConceptId,
-          }),
-        });
+        const data = await callApiRender('section', currentProjectId, currentConceptId, conceptBrief);
 
-        if (!response.ok) {
-          const contentType = response.headers.get('content-type');
-          let errorMessage = `HTTP error! status: ${response.status}`;
-          if (contentType && contentType.includes('application/json')) {
-            const error = await response.json();
-            errorMessage = error.error || error.message || errorMessage;
-          } else {
-            const text = await response.text();
-            if (text.includes('<!DOCTYPE') || text.includes('<html')) {
-              errorMessage = `Server returned HTML instead of JSON. Check if server is running at ${API_URL}`;
-            } else {
-              errorMessage = text || errorMessage;
-            }
-          }
-          throw new Error(errorMessage);
-        }
-
-        const data = await response.json();
-
-        // Display section image in render result container
         renderSectionResult.innerHTML = `
           <h4 style="margin-bottom: 10px;">Section View</h4>
-          <img src="${data.sectionImageUrl}" alt="Section view" style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px;">
+          <img src="${data.imageUrl}" alt="Section view" style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px;">
+          <p style="margin: 5px 0 0 0; font-size: 12px; color: #666;">v${data.promptVersion}</p>
         `;
 
         showStatus('Section generated successfully!', 'success');
       } catch (error) {
         console.error('Error generating section:', error);
-        renderSectionResult.innerHTML = `<p style="color: #f44336;">Error: ${error.message}</p>`;
-        showStatus(`Error: ${error.message}`, 'error');
+        
+        if (error.status === 409 && error.data?.error === 'AXON_REQUIRED') {
+          renderSectionResult.innerHTML = `
+            <div style="padding: 15px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 4px;">
+              <p style="margin: 0; color: #856404; font-weight: 600;">⚠️ Axon Required</p>
+              <p style="margin: 8px 0 0 0; font-size: 13px; color: #856404;">${error.data.message}</p>
+            </div>
+          `;
+        } else {
+          renderSectionResult.innerHTML = `<p style="color: #f44336;">Error: ${error.data?.message || error.message || 'Failed to generate section'}</p>`;
+        }
       } finally {
         renderGenerateSectionBtn.disabled = false;
       }
@@ -1693,17 +1446,9 @@
       hideResult();
 
       const projectId = document.getElementById('projectId').value;
-      const renderMode = document.querySelector('input[name="renderMode"]:checked').value;
-      const imageFile = document.getElementById('image').files[0];
 
       if (!projectId) {
         showStatus('Please fill in all required fields', 'error');
-        return;
-      }
-
-      // Only require image file if in "structured + sketch" mode
-      if (renderMode === 'structured-sketch' && !imageFile) {
-        showStatus('Please upload a sketch image or PDF', 'error');
         return;
       }
 
@@ -1832,27 +1577,35 @@
       showStatus('Generating rendering...', 'info');
 
       try {
-        // Build request payload (using ConceptBrief format)
-        const payload = {
-          conceptInputs: conceptBrief, // Server accepts both ConceptBrief and ConceptInputs
+        // Map outputType to renderType
+        const outputType = conceptBrief.proposedDesign.outputType;
+        const renderTypeMap = {
+          'concept_axonometric': 'axonometric',
+          'concept_plan': 'floor_plan',
+          'concept_section': 'section',
         };
+        const renderType = renderTypeMap[outputType] || 'axonometric';
+
+        const payload = {
+          projectId: projectId,
+          renderType: renderType,
+          conceptInputs: conceptBrief,
+        };
+
+        // Add concept ID if available (for correlated plan/section views)
+        if (currentConceptId && currentProjectId === projectId) {
+          payload.conceptId = currentConceptId;
+        }
 
         // Add site context summary if available
         if (siteContextSummary) {
           payload.siteContextSummary = siteContextSummary;
         }
 
-        // Only add sketchImageBase64 if mode is "structured-sketch" and image exists
-        if (renderMode === 'structured-sketch' && imageFile) {
-          showStatus('Converting image to base64...', 'info');
-          const imageBase64 = await fileToBase64(imageFile);
-          payload.sketchImageBase64 = imageBase64;
-        }
-
         // Log payload before sending
         console.log('Request Payload:', payload);
 
-        const response = await fetch(`${API_URL}/render`, {
+        const response = await fetch(`${API_URL}/api/render`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -1876,6 +1629,13 @@
         }
 
         const data = await response.json();
+        
+        // Update concept ID for this project
+        if (data.conceptId) {
+          currentConceptId = data.conceptId;
+          currentProjectId = projectId;
+        }
+        
         showResult(data);
         showStatus('Rendering generated successfully!', 'success');
       } catch (error) {

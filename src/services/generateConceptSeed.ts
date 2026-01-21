@@ -118,7 +118,8 @@ function validateAndNormalizeSeed(seed: unknown): ConceptSeed {
  */
 export async function generateConceptSeed(brief: ConceptBrief): Promise<ConceptSeed> {
   // Build a prompt that focuses on extracting structured concept parameters
-  const conceptPrompt = buildConceptPrompt(brief);
+  const promptResult = buildConceptPrompt(brief);
+  const conceptPrompt = promptResult.prompt;
 
   const systemPrompt = `You are an architectural concept analyzer. Your task is to analyze an architectural brief and generate a structured concept seed describing the key design parameters.
 

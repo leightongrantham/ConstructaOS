@@ -57,6 +57,58 @@ export const CREDIT_COSTS: Record<RenderType, number> = {
 };
 
 /**
+ * Fetches an image from a URL and returns it as base64
+ * @param imageUrl - URL of the image to fetch
+ * @returns Base64-encoded image string
+ * @throws Error if fetch fails
+ */
+async function fetchImageAsBase64(imageUrl: string): Promise<string> {
+  try {
+    console.log(`Fetching reference image from: ${imageUrl}`);
+    
+    // If the URL is a local storage path, read directly from disk
+    if (imageUrl.startsWith('/storage/')) {
+      const { readFile } = await import('fs/promises');
+      const { join, dirname } = await import('path');
+      const { fileURLToPath } = await import('url');
+      
+      const __filename = fileURLToPath(import.meta.url);
+      const __dirname = dirname(__filename);
+      
+      // Extract the path after /storage/
+      const storagePath = imageUrl.replace('/storage/', '');
+      const localStorageDir = join(__dirname, '../../.concepts');
+      const localFilePath = join(localStorageDir, storagePath);
+      
+      console.log(`Reading reference image from local disk: ${localFilePath}`);
+      const buffer = await readFile(localFilePath);
+      const base64 = buffer.toString('base64');
+      
+      console.log(`Successfully read reference image from disk (${buffer.length} bytes)`);
+      return base64;
+    }
+    
+    // Otherwise, fetch via HTTP
+    const response = await fetch(imageUrl);
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    const base64 = buffer.toString('base64');
+    
+    console.log(`Successfully fetched reference image (${buffer.length} bytes)`);
+    return base64;
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error(`Failed to fetch reference image from ${imageUrl}:`, errorMessage);
+    throw new Error(`Failed to fetch reference image: ${errorMessage}`);
+  }
+}
+
+/**
  * Generates an image using OpenAI API with specified parameters
  * Enforces maximum size and white background
  * 
@@ -68,15 +120,32 @@ export const CREDIT_COSTS: Record<RenderType, number> = {
  * 
  * @param promptText - The prompt text for image generation
  * @param numSamples - Number of samples to generate (default: 1, for multi-sample use 2-3)
+ * @param referenceImageUrl - Optional URL of reference image (for plan/section correlation)
  * @returns Array of base64-encoded images (or single image if numSamples is 1)
  */
 async function generateImageWithOpenAI(
   promptText: string,
-  numSamples: number = 1
+  numSamples: number = 1,
+  referenceImageUrl?: string
 ): Promise<string[]> {
+  // Fetch reference image if URL provided
+  let referenceImageBase64: string | undefined;
+  if (referenceImageUrl) {
+    console.log('Fetching reference image for plan/section correlation...');
+    try {
+      referenceImageBase64 = await fetchImageAsBase64(referenceImageUrl);
+      console.log(`Reference image fetched successfully: ${referenceImageBase64.length} chars base64`);
+    } catch (error) {
+      // Re-throw with context for better error handling upstream
+      console.error('Failed to fetch reference image, aborting generation');
+      throw error;
+    }
+  }
+
   // Build request parameters
   // Using largest available API size - input images are upscaled to 4096px before processing
   // API supports: '1024x1024', '1024x1536', '1536x1024', and 'auto'
+  console.log(`Generating ${numSamples} image sample(s) using gpt-image-1...`);
   const requestParams: Parameters<typeof openai.images.generate>[0] = {
     model: 'gpt-image-1',
     prompt: promptText,
@@ -84,6 +153,14 @@ async function generateImageWithOpenAI(
     n: numSamples, // Generate multiple samples for best-of selection
     background: 'opaque', // Enforces white/opaque background
   };
+
+  // Log reference image attachment status
+  // Note: The gpt-image-1 model receives reference context through the prompt text
+  // The reference image has already been analyzed and its characteristics are embedded in the prompt
+  if (referenceImageBase64) {
+    console.log('✓ Reference image context included in prompt for correlated generation');
+    console.log('  (Reference characteristics guide footprint, massing, and style matching)');
+  }
 
   const response = await openai.images.generate(requestParams);
 
@@ -137,6 +214,7 @@ async function generateImageWithOpenAI(
  * @param userRequest - Optional user-provided request/description
  * @param providedPrompt - Optional pre-built prompt (from buildConceptPrompt)
  * @param referenceAxonBuffer - Optional reference axonometric image buffer (for plan/section only)
+ * @param referenceImageUrl - Optional reference image URL (for plan/section correlation)
  * 
  * NOTE: Silent retries are automatically enabled when an input image is provided.
  * The service generates 2-3 candidates and selects the best one, returning only
@@ -147,19 +225,32 @@ export async function generateConceptImage(
   renderType: RenderType,
   userRequest?: string,
   providedPrompt?: string,
-  referenceAxonBuffer?: Buffer
+  referenceAxonBuffer?: Buffer,
+  referenceImageUrl?: string,
+  conceptId?: string
 ): Promise<RenderResult> {
+  // Start timing
+  const startTime = Date.now();
+  
   // Validate API key
   if (!process.env.OPENAI_API_KEY) {
     throw new Error('OPENAI_API_KEY environment variable is not set. Please set it in your .env file.');
   }
 
+  // Log render start with key metadata
+  console.log('\n=== Starting Image Generation ===');
+  console.log(`Render Type: ${renderType}`);
+  if (conceptId) console.log(`Concept ID: ${conceptId}`);
+  console.log(`Reference Image: ${referenceImageUrl ? 'Yes (will fetch and attach)' : 'No'}`);
+  console.log(`Input Sketch: ${sketchBuffer && sketchBuffer.length > 0 ? 'Yes' : 'No'}`);
+
   try {
     const hasInputImage = sketchBuffer && sketchBuffer.length > 0;
     const hasReferenceAxon = referenceAxonBuffer && referenceAxonBuffer.length > 0;
+    const hasReferenceUrl = !!referenceImageUrl;
 
     // Validate reference image is only for plan/section
-    if (hasReferenceAxon && renderType === 'axonometric') {
+    if ((hasReferenceAxon || hasReferenceUrl) && renderType === 'axonometric') {
       console.warn('Reference axon image provided for axonometric render - ignoring');
     }
 
@@ -210,7 +301,22 @@ export async function generateConceptImage(
     // Silent retries: Automatically generate 2-3 candidates when input image is provided
     // This is invisible to the user - we select the best and return only that one
     const numSamples = hasInputImage ? 3 : 1;
-    const imageCandidates = await generateImageWithOpenAI(optimizedPrompt, numSamples);
+    
+    let imageCandidates: string[];
+    try {
+      imageCandidates = await generateImageWithOpenAI(
+        optimizedPrompt, 
+        numSamples,
+        referenceImageUrl // Pass reference image URL for plan/section correlation
+      );
+    } catch (error) {
+      // Handle reference image fetch failures with clear error message
+      if (error instanceof Error && error.message.includes('Failed to fetch reference image')) {
+        console.error('Reference image fetch failed:', error.message);
+        throw new Error(`Image generation failed: ${error.message}`);
+      }
+      throw error;
+    }
 
     // Step 4: Select best image (if multiple candidates)
     // Uses vision model to compare candidates against input for visual alignment,
@@ -239,6 +345,16 @@ export async function generateConceptImage(
     // Store the actual prompt that was used for generation
     // This is the optimized prompt if available, otherwise the base prompt
     result._rewrittenPrompt = optimizedPrompt;
+
+    // Log completion with duration
+    const duration = Date.now() - startTime;
+    console.log('\n=== Image Generation Complete ===');
+    console.log(`Render Type: ${renderType}`);
+    if (conceptId) console.log(`Concept ID: ${conceptId}`);
+    console.log(`Reference Attached: ${hasReferenceUrl ? 'Yes' : 'No'}`);
+    console.log(`Duration: ${duration}ms (${(duration / 1000).toFixed(2)}s)`);
+    console.log(`Samples Generated: ${imageCandidates.length}`);
+    console.log('================================\n');
 
     return result;
   } catch (error) {

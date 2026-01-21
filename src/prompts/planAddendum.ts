@@ -1,58 +1,85 @@
 /**
  * Plan addendum prompts
  * Strict requirements for top-down orthographic plan diagrams
- * Must match conceptSeed footprint + massingMoves
+ * Must match conceptSeed footprint + axon reference footprint + ConstructaOS style
  */
 
 import type { ConceptSeed } from '../services/generateConceptSeed.js';
 
-export const PLAN_ADDENDUM_VERSION = 'plan_addendum_v1';
+export const PLAN_ADDENDUM_VERSION = 'plan_addendum_v5';
 
 /**
- * Generates a plan-specific addendum that enforces strict diagrammatic requirements
- * and matches the conceptSeed footprint and massing moves
+ * Generates a plan-specific addendum that enforces strict alignment with
+ * the concept seed and axon reference image
  */
 export function getPlanAddendum(conceptSeed: ConceptSeed): string {
   const footprintDescription = getFootprintDescription(conceptSeed.footprintShape);
   const massingDescription = getMassingMovesDescription(conceptSeed.massingMoves);
+  const storeysText = conceptSeed.storeys === '1' ? 'single storey' : conceptSeed.storeys === '2' ? 'two storey' : 'three+ storey';
+  const roofText = conceptSeed.roof === 'flat' ? 'flat roof' : conceptSeed.roof === 'pitched' ? 'pitched roof' : 'mixed roof';
 
-  return `PLAN VIEW REQUIREMENTS (CRITICAL - STRICTER THAN AXONOMETRIC):
+  return `FLOOR PLAN VIEW REQUIREMENTS (CRITICAL):
 
 PROJECTION TYPE (NON-NEGOTIABLE):
 - Top-down orthographic projection only - 90-degree vertical view directly from above
 - NO isometric, NO axonometric, NO perspective - purely orthographic plan view
 - NO depth cues, NO 3D effects, NO vertical lines showing height
-- Diagrammatic/abstract block representation - geometric shapes only
+- Purely plan representation - horizontal cut through building at approximately 1.2m above ground floor
 
-FOOTPRINT CONSTRAINTS (MUST MATCH CONCEPT SEED):
+STRICT ALIGNMENT WITH AXON REFERENCE (CRITICAL):
+- The axonometric reference image shows the EXACT building you must produce the plan of
+- Match the axon reference footprint EXACTLY - same building outline, same proportions
+- Match the ConstructaOS illustration style of the axon reference EXACTLY - same line quality, same tonal treatment, same overall aesthetic
+- The plan is a direct top-down view of what's shown in the axon - they must correlate perfectly
+- Study the axon reference carefully and extract the footprint shape, building dimensions, and massing
+
+PLAN GEOMETRY RULE (TRACING REQUIREMENT):
+- Derive the overall building outline by tracing/simplifying the footprint implied by the axonometric reference
+- Do NOT invent a new footprint
+- Keep the plan within the same outline category (rectangular, L-shaped, courtyard, linear) as shown in the axon
+- The plan outline must be a faithful top-down projection of the axon's footprint
+
+FOOTPRINT CONSTRAINTS (MUST MATCH CONCEPT SEED AND AXON):
+- Building type: ${storeysText} building with ${roofText}
 - Footprint shape: ${footprintDescription}
 ${massingDescription}
 
-CONTENT RESTRICTIONS:
-- GROUND FLOOR PLAN ONLY - single-level plan diagram showing spatial organization
-- Focus on walls, partitions, openings (doors/windows) - architectural structure only
-- NO furniture, NO fixtures, NO appliances, NO interior objects
-- NO labels, NO text, NO dimensions, NO annotations
-- NO room names, NO door swings, NO detailed window representation
+HARD CONSTRAINT - NO NEW ELEMENTS:
+- Do NOT introduce new wings, courtyards, or extensions not present in the concept seed or axon reference
+- Do NOT add new massing moves or roof forms beyond what's specified
+- The design must strictly match the footprint and massing already established
+- If in doubt, stay simpler - match the axon reference footprint exactly
 
-GEOMETRIC REPRESENTATION:
-- Show walls, partitions, and openings clearly
-- Spaces shown as defined by walls and partitions
-- Openings indicated by gaps or simple representations
-- Can include simple landscape context around building (garden, patio, surrounding area)
+STYLE CONTINUITY (CRITICAL):
+- Match the same ConstructaOS ink-on-paper style as the axonometric reference
+- Off-white paper texture (not pure white), thin black ink linework, calm composition, subtle tonal shading
+- Do NOT switch to blueprint style, CAD style, or technical drawing conventions
+- Maintain the same visual language and aesthetic quality as the axon reference
+- The plan should feel like it was drawn by the same hand as the axonometric
 
-STYLE REQUIREMENTS (NEAVE BROWN STYLING - SAME AS AXONOMETRIC):
-- Neave Brown–inspired architectural language
-- Clean, precise black ink linework with subtle grayscale hatching for depth and material texture
-- Thin, consistent black linework
-- Off-white paper background
-- Subtle tonal variation only
-- Can include simple landscape elements: garden, patio, surrounding context (minimalist grayscale rendering)
-- Can include minimal line-drawn figures for scale (standing, sitting) - appropriate for plan view
-- Human-scale proportions
-- Calm, neutral presentation suitable for early design discussion
+LINE HIERARCHY AND REPRESENTATION:
+- Outer cut walls (building perimeter): Slightly heavier line weight - emphasize building edge
+- Internal partitions: Lighter line weight - secondary hierarchy
+- Openings (doors/windows): Indicated by gaps or very light lines in wall plane
+- Optional: Very light poche (subtle solid/hatching) for cut walls - use sparingly, keep subtle
+- All lines should be clean, precise, consistent with ConstructaOS style from axon reference
 
-OUTPUT: A clean architectural concept floor plan diagram in Neave Brown style. Top-down orthographic view showing walls, spaces, and openings. Can include simple landscape context and minimal figures for scale. No furniture, labels, or dimensions.`;
+CONTENT RESTRICTIONS (ABSOLUTE):
+- GROUND FLOOR PLAN ONLY - single-level horizontal cut at approximately 1.2m above floor
+- Show walls, partitions, openings (doors/windows) - architectural structure only
+- NO people, NO furniture, NO fixtures, NO appliances, NO interior objects
+- NO labels, NO text, NO dimensions, NO annotations, NO room names
+- NO door swings, NO detailed window frames, NO technical symbols
+- Can include simple landscape context around building perimeter (garden, patio, trees) - minimalist rendering only
+
+SPATIAL ORGANIZATION:
+- Use zoning hints from concept seed:
+  * Public zone: ${conceptSeed.zoningHint.publicZone}
+  * Private zone: ${conceptSeed.zoningHint.privateZone}
+- Show clear spatial organization through wall and partition placement
+- Maintain logical circulation and spatial flow appropriate to building type
+
+OUTPUT: A conceptual orthographic plan in the same ink-on-paper style as the axonometric reference. Simplified, legible, restrained. Top-down view correlating exactly to the axon's footprint and massing. Clear line hierarchy with slightly heavier outer walls. No furniture, no people, no labels, no dimensions.`;
 }
 
 function getFootprintDescription(shape: ConceptSeed['footprintShape']): string {

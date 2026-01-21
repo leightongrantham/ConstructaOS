@@ -5,8 +5,14 @@
 import type { ConceptInputs, ConceptBrief, ProjectType, BuildingForm, Storeys, NumberOfPlots, FloorAreaRange, FootprintScale, Bedrooms, Bathrooms, KitchenType, LivingSpaces, RoofType, MassingPreference, Orientation, Density } from '../types/conceptInputs.js';
 import { legacyInputsToConceptBrief } from '../types/conceptInputs.js';
 import type { ConceptSeed } from './generateConceptSeed.js';
-import { getPlanAddendum } from '../prompts/planAddendum.js';
-import { getSectionAddendum } from '../prompts/sectionAddendum.js';
+import { getPlanAddendum, PLAN_ADDENDUM_VERSION } from '../prompts/planAddendum.js';
+import { getSectionAddendum, SECTION_ADDENDUM_VERSION } from '../prompts/sectionAddendum.js';
+import { CONSTRUCTAOS_STYLE_LOCK } from '../prompts/styleLock.js';
+
+// Prompt version constants for tracking changes
+export const AXON_PROMPT_VERSION = 'axon_v1'; // Frozen - do not change
+export const PLAN_PROMPT_VERSION = PLAN_ADDENDUM_VERSION; // Tracks plan addendum version
+export const SECTION_PROMPT_VERSION = SECTION_ADDENDUM_VERSION; // Tracks section addendum version
 
 export interface BuildConceptPromptOptions {
   hasSketch?: boolean;
@@ -14,6 +20,11 @@ export interface BuildConceptPromptOptions {
   conceptSeed?: ConceptSeed;
   hasReferenceAxon?: boolean;
   isInferredContext?: boolean; // Indicates if existing context was inferred from address lookup/map data
+}
+
+export interface BuildConceptPromptResult {
+  prompt: string;
+  promptVersion: string;
 }
 
 // Helper functions to convert enum values to readable text
@@ -240,11 +251,12 @@ function formatDensity(density: Density): string {
 /**
  * Builds an architectural concept prompt from structured inputs
  * Accepts both ConceptBrief (new format) and ConceptInputs (legacy format) for backward compatibility
+ * @returns Object containing the prompt and its version
  */
 export function buildConceptPrompt(
   inputs: ConceptBrief | ConceptInputs,
   options?: BuildConceptPromptOptions
-): string {
+): BuildConceptPromptResult {
   // Normalize to ConceptBrief format
   const brief: ConceptBrief = 'proposedDesign' in inputs
     ? inputs
@@ -400,10 +412,10 @@ export function buildConceptPrompt(
 
   parts.push(`Proposed intervention:\n${interventionParts.join('\n')}`);
 
-  // SECTION 4 — CONCEPT SEED (optional - must remain consistent across views)
+  // SECTION 4 — CONCEPT SEED (must remain consistent across views)
   if (options?.conceptSeed) {
     const seedJson = JSON.stringify(options.conceptSeed, null, 2);
-    parts.push(`\nConcept seed (must remain consistent across views):\n${seedJson}`);
+    parts.push(`\nCONCEPT SEED (MUST REMAIN CONSISTENT ACROSS VIEWS):\n${seedJson}`);
   }
 
   // SECTION 5 — SITE / CONTEXT (optional)
@@ -457,17 +469,25 @@ export function buildConceptPrompt(
       break;
   }
   
+  // HARD CONSTRAINT for plan/section outputs (before output instructions)
+  if ((proposedDesign.outputType === 'concept_plan' || proposedDesign.outputType === 'concept_section') && options?.conceptSeed && options?.hasReferenceAxon) {
+    parts.push(
+      '\nCRITICAL: Do not introduce any new design moves not present in the concept seed and axonometric reference.'
+    );
+    
+    // Explicit instruction to use both sources
+    parts.push(`
+PRIMARY SOURCES (use both):
+1) The structured inputs and concept seed define programme, storeys, roof, and intent.
+2) The provided axonometric reference image defines the footprint, massing, and composition.
+
+Do not contradict either source. If uncertain, prefer the axonometric reference for geometry and the structured inputs for programme.`);
+  }
+  
   parts.push(`\n${outputInstruction}`);
   parts.push(
     'Focus on massing, scale, and spatial clarity.\nDo not include dimensions, labels, annotations, or technical symbols.'
   );
-
-  // Hard constraint for plan/section outputs when conceptSeed exists
-  if ((proposedDesign.outputType === 'concept_plan' || proposedDesign.outputType === 'concept_section') && options?.conceptSeed) {
-    parts.push(
-      '\nCRITICAL CONSTRAINT: Do not introduce new wings, courtyards, or roof forms not present in the concept seed. The design must strictly match the footprint, massing moves, storeys, and roof profile specified in the concept seed.'
-    );
-  }
 
   // Output-specific addenda (for plan and section only)
   if (outputAddendum) {
@@ -486,18 +506,27 @@ export function buildConceptPrompt(
   }
 
   // SECTION 8 — FIXED CONSTRUCTAOS STYLE LOCK (same for all view types)
-  if (proposedDesign.outputType === 'concept_axonometric') {
-    // Axonometric style (existing)
-    parts.push(
-      '\nStyle requirements:\n- Neave Brown–inspired architectural language\n- Thin, consistent black linework\n- Off-white paper background\n- Subtle tonal variation only\n- Human-scale proportions\n- Minimal line-drawn people for scale and everyday life (sitting, walking, talking)\n- Simple landscape elements: trees, shrubs, garden, patio (minimalist grayscale rendering)\n- No cars, furniture, text, labels, annotations, or technical symbols\n- Calm, neutral presentation suitable for early design discussion'
-    );
-  } else if (proposedDesign.outputType === 'concept_plan' || proposedDesign.outputType === 'concept_section') {
-    // Plan and section use same Neave Brown styling (details in addenda)
-    parts.push(
-      '\nStyle requirements:\n- Neave Brown–inspired architectural language\n- Thin, consistent black linework\n- Off-white paper background\n- Subtle tonal variation only\n- Human-scale proportions\n- No cars, furniture, text, labels, annotations, or technical symbols\n- Calm, neutral presentation suitable for early design discussion'
-    );
+  parts.push(`\n${CONSTRUCTAOS_STYLE_LOCK}`);
+
+  // Determine prompt version based on output type
+  let promptVersion: string;
+  switch (proposedDesign.outputType) {
+    case 'concept_axonometric':
+      promptVersion = AXON_PROMPT_VERSION;
+      break;
+    case 'concept_plan':
+      promptVersion = PLAN_PROMPT_VERSION;
+      break;
+    case 'concept_section':
+      promptVersion = SECTION_PROMPT_VERSION;
+      break;
+    default:
+      promptVersion = 'structured-v1';
   }
 
-  return parts.join('\n\n');
+  return {
+    prompt: parts.join('\n\n'),
+    promptVersion,
+  };
 }
 

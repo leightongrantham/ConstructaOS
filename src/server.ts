@@ -15,9 +15,10 @@ import { buildSiteContextSummary } from './services/buildSiteContextSummary.js';
 import { queryNearbyBuildings } from './services/queryNearbyBuildings.js';
 import { inferExistingContextFromOSM } from './services/inferExistingContextFromOSM.js';
 import { generateConceptSeed } from './services/generateConceptSeed.js';
-import { storeConceptSeed, getConceptSeed } from './utils/conceptStorage.js';
+import { storeConceptSeed, getConceptSeed, storeRenderedImage, loadConceptSeed, saveConceptSeed, loadRenderedImage, getRenderedImageUrl } from './utils/conceptStorage.js';
 import type { ConceptInputs, ConceptBrief } from './types/conceptInputs.js';
 import { legacyInputsToConceptBrief, conceptBriefToLegacyInputs } from './types/conceptInputs.js';
+import type { RenderType, RenderResponse } from './types/render.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -79,12 +80,52 @@ export function createServer(): express.Application {
   // Middleware
   app.use(express.json());
 
-  // Serve static files from public directory
-  app.use(express.static(join(__dirname, '../public')));
-
   // Health check endpoint
   app.get('/health', (_req: Request, res: Response) => {
     res.json({ status: 'ok' });
+  });
+
+  // GET /storage/* endpoint for serving local storage files
+  app.get('/storage/*', async (req: Request, res: Response) => {
+    try {
+      // Extract the path after /storage/
+      const storagePath = req.path.replace('/storage/', '');
+      
+      // Construct local file path (from src/ when running with tsx)
+      const localStorageDir = join(__dirname, '../.concepts');
+      const localFilePath = join(localStorageDir, storagePath);
+      
+      // Security check: ensure the path is within the storage directory
+      const normalizedPath = join(localStorageDir, storagePath);
+      if (!normalizedPath.startsWith(localStorageDir)) {
+        res.status(403).json({ error: 'Access denied' });
+        return;
+      }
+      
+      // Check if file exists and serve it
+      const fs = await import('fs/promises');
+      try {
+        const fileBuffer = await fs.readFile(localFilePath);
+        
+        // Set appropriate content type based on file extension
+        if (localFilePath.endsWith('.png')) {
+          res.setHeader('Content-Type', 'image/png');
+        } else if (localFilePath.endsWith('.json')) {
+          res.setHeader('Content-Type', 'application/json');
+        }
+        
+        res.send(fileBuffer);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+          res.status(404).json({ error: 'File not found' });
+        } else {
+          throw error;
+        }
+      }
+    } catch (error) {
+      console.error('Error serving storage file:', error);
+      res.status(500).json({ error: 'Failed to serve file' });
+    }
   });
 
   // POST /api/geocode endpoint for address lookup
@@ -216,6 +257,184 @@ export function createServer(): express.Application {
     }
   );
 
+  // POST /api/render endpoint - Simplified render API with concept seed
+  app.post(
+    '/api/render',
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+      try {
+        const { projectId, renderType, conceptId, conceptInputs } = req.body;
+
+        // Validate required fields
+        if (!projectId || typeof projectId !== 'string') {
+          res.status(400).json({
+            error: 'projectId is required and must be a string',
+          });
+          return;
+        }
+
+        if (!renderType || typeof renderType !== 'string') {
+          res.status(400).json({
+            error: 'renderType is required and must be a string',
+          });
+          return;
+        }
+
+        // Validate renderType is one of the allowed values
+        const validRenderTypes: RenderType[] = ['axonometric', 'floor_plan', 'section'];
+        if (!validRenderTypes.includes(renderType as RenderType)) {
+          res.status(400).json({
+            error: 'renderType must be one of: "axonometric", "floor_plan", "section"',
+          });
+          return;
+        }
+
+        // For plan/section, conceptId is REQUIRED (must be correlated with existing axon)
+        const requiresExistingConcept = renderType === 'floor_plan' || renderType === 'section';
+        if (requiresExistingConcept && (!conceptId || typeof conceptId !== 'string')) {
+          res.status(400).json({
+            error: 'conceptId is required for floor_plan and section renders',
+          });
+          return;
+        }
+
+        // Validate conceptInputs (required for seed generation)
+        if (!conceptInputs) {
+          res.status(400).json({
+            error: 'conceptInputs is required (ConceptBrief or ConceptInputs)',
+          });
+          return;
+        }
+
+        // Accept both ConceptBrief (new format) and ConceptInputs (legacy format)
+        let conceptBrief: ConceptBrief;
+        
+        if ('proposedDesign' in conceptInputs) {
+          // Already in ConceptBrief format
+          conceptBrief = conceptInputs as ConceptBrief;
+        } else if (isValidConceptInputs(conceptInputs)) {
+          // Convert legacy ConceptInputs to ConceptBrief
+          conceptBrief = legacyInputsToConceptBrief(conceptInputs);
+        } else {
+          res.status(400).json({
+            error: 'conceptInputs must be a valid ConceptInputs or ConceptBrief object',
+          });
+          return;
+        }
+
+        // Map renderType to outputType for conceptBrief
+        const outputTypeMap = {
+          'axonometric': 'concept_axonometric',
+          'floor_plan': 'concept_plan',
+          'section': 'concept_section',
+        } as const;
+        conceptBrief.proposedDesign.outputType = outputTypeMap[renderType as RenderType];
+
+        // Generate conceptId if not provided (only for axonometric)
+        const finalConceptId = conceptId && typeof conceptId === 'string' ? conceptId : randomUUID();
+
+        // SEED PIPELINE: Load or generate concept seed
+        let conceptSeed = await loadConceptSeed(projectId, finalConceptId);
+        
+        if (conceptSeed) {
+          // Use existing seed
+          console.log(`Using existing concept seed for ${projectId}/${finalConceptId}`);
+        } else {
+          // For plan/section, seed MUST exist (return 409 if missing)
+          if (requiresExistingConcept) {
+            res.status(409).json({
+              error: 'SEED_REQUIRED',
+              message: 'Concept seed missing. Regenerate concept.',
+            });
+            return;
+          }
+          
+          // Generate new seed (only for axonometric)
+          console.log(`Generating new concept seed for ${projectId}/${finalConceptId}`);
+          conceptSeed = await generateConceptSeed(conceptBrief);
+          
+          // Store the seed for reuse
+          await saveConceptSeed(projectId, finalConceptId, conceptSeed);
+        }
+
+        // AXON REQUIREMENT CHECK: For floor_plan or section, require axon image
+        let referenceImageUrl: string | undefined;
+        
+        if (requiresExistingConcept) {
+          // Check if axonometric image exists by trying to load it
+          const axonBuffer = await loadRenderedImage(projectId, finalConceptId, 'axonometric');
+          
+          if (!axonBuffer) {
+            // Axon image not found - return 409 error
+            res.status(409).json({
+              error: 'AXON_REQUIRED',
+              message: 'Generate axonometric first for correlated plan/section.',
+            });
+            return;
+          }
+          
+          // Get the URL of the axonometric image (don't need the buffer anymore)
+          referenceImageUrl = getRenderedImageUrl(projectId, finalConceptId, 'axonometric') || undefined;
+          
+          if (referenceImageUrl) {
+            console.log(`Using axonometric reference for ${renderType} render: ${referenceImageUrl}`);
+          }
+        }
+
+        // Build prompt with concept seed and reference axon flag
+        const promptResult = buildConceptPrompt(conceptBrief, {
+          conceptSeed,
+          hasReferenceAxon: !!referenceImageUrl,
+        });
+
+        // Generate the render with the built prompt
+        let result;
+        try {
+          result = await generateConceptImage(
+            Buffer.alloc(0), // No sketch input
+            renderType as RenderType,
+            undefined, // No user request
+            promptResult.prompt,    // Use prompt with concept seed
+            undefined, // No buffer needed
+            referenceImageUrl, // Pass reference image URL for plan/section
+            finalConceptId // Pass concept ID for logging
+          );
+        } catch (error) {
+          // Handle reference image fetch failures
+          if (error instanceof Error && error.message.includes('Failed to fetch reference image')) {
+            console.error('Reference image fetch failed:', error);
+            res.status(500).json({
+              error: 'REFERENCE_IMAGE_FETCH_FAILED',
+              message: 'Failed to fetch reference axonometric image for correlation.',
+              details: error.message,
+            });
+            return;
+          }
+          throw error;
+        }
+
+        // Store the rendered image
+        const imageUrl = await storeRenderedImage(
+          projectId,
+          finalConceptId,
+          renderType,
+          result.imageBase64
+        );
+
+        // Build and send response
+        const response: RenderResponse = {
+          conceptId: finalConceptId,
+          renderType: renderType as RenderType,
+          imageUrl,
+          promptVersion: promptResult.promptVersion,
+        };
+
+        res.json(response);
+      } catch (error) {
+        next(error);
+      }
+    }
+  );
+
   // POST /render endpoint
   app.post(
     '/render',
@@ -284,7 +503,7 @@ export function createServer(): express.Application {
         }
 
         // Build prompt from structured inputs (accepts both ConceptBrief and ConceptInputs)
-        const prompt = buildConceptPrompt(conceptBrief, buildOptions);
+        const promptResult = buildConceptPrompt(conceptBrief, buildOptions);
 
         // Convert sketch base64 to buffer if present
         let sketchBuffer: Buffer | undefined;
@@ -339,7 +558,7 @@ export function createServer(): express.Application {
           sketchBuffer || Buffer.alloc(0),
           renderType,
           undefined, // userRequest not used with structured inputs
-          prompt, // Pass the pre-built prompt
+          promptResult.prompt, // Pass the pre-built prompt
           referenceAxonBuffer // Pass reference axon buffer for plan/section renders
         );
 
@@ -359,9 +578,9 @@ export function createServer(): express.Application {
           conceptSeed, // Include conceptSeed in response for UI
           imageBase64: result.imageBase64,
           model: result.model,
-          promptVersion: result.promptVersion,
+          promptVersion: promptResult.promptVersion,
           outputType: legacyInputs.outputType,
-          promptText: result._rewrittenPrompt || prompt,
+          promptText: result._rewrittenPrompt || promptResult.prompt,
         });
       } catch (error) {
         next(error);
@@ -410,7 +629,7 @@ export function createServer(): express.Application {
         const conceptSeed = await generateConceptSeed(conceptBrief);
 
         // Build prompt for axonometric view
-        const prompt = buildConceptPrompt(conceptBrief, {
+        const promptResult = buildConceptPrompt(conceptBrief, {
           conceptSeed,
         });
 
@@ -419,7 +638,7 @@ export function createServer(): express.Application {
           Buffer.alloc(0), // No sketch input for create endpoint
           'axonometric',
           undefined,
-          prompt
+          promptResult.prompt
         );
 
         // Create a data URL for the axon image (for testing, can be replaced with proper storage)
@@ -509,7 +728,7 @@ export function createServer(): express.Application {
         };
 
         // Build prompt with seed and reference axon
-        const prompt = buildConceptPrompt(conceptBrief, {
+        const promptResult = buildConceptPrompt(conceptBrief, {
           conceptSeed: storedConcept.conceptSeed,
           hasReferenceAxon: true,
         });
@@ -519,7 +738,7 @@ export function createServer(): express.Application {
           Buffer.alloc(0),
           'floor_plan',
           undefined,
-          prompt,
+          promptResult.prompt,
           referenceAxonBuffer
         );
 
@@ -604,7 +823,7 @@ export function createServer(): express.Application {
         };
 
         // Build prompt with seed and reference axon
-        const prompt = buildConceptPrompt(conceptBrief, {
+        const promptResult = buildConceptPrompt(conceptBrief, {
           conceptSeed: storedConcept.conceptSeed,
           hasReferenceAxon: true,
         });
@@ -614,7 +833,7 @@ export function createServer(): express.Application {
           Buffer.alloc(0),
           'section',
           undefined,
-          prompt,
+          promptResult.prompt,
           referenceAxonBuffer
         );
 
@@ -631,6 +850,12 @@ export function createServer(): express.Application {
       }
     }
   );
+
+  // Serve static files from public directory (after all API routes)
+  // Only serve static files for GET requests to avoid interfering with API routes
+  app.get('*', express.static(join(__dirname, '../public'), {
+    index: 'index.html',
+  }));
 
   // Error handling middleware - must be last
   app.use((err: Error, _req: Request, res: Response, _next: NextFunction): void => {

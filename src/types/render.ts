@@ -10,6 +10,14 @@ export type RenderType =
 export interface RenderRequest {
   projectId: string;
   renderType: RenderType;
+  conceptId?: string;
+}
+
+export interface RenderResponse {
+  conceptId: string;
+  renderType: RenderType;
+  imageUrl: string;
+  promptVersion: string;
 }
 
 export interface RenderResult {
@@ -17,5 +25,7 @@ export interface RenderResult {
   model: string;
   promptVersion: string;
   renderType: RenderType;
+  // Internal: rewritten prompt from vision analysis (not exposed to user)
+  _rewrittenPrompt?: string;
 }
 

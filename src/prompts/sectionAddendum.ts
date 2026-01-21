@@ -6,7 +6,7 @@
 
 import type { ConceptSeed } from '../services/generateConceptSeed.js';
 
-export const SECTION_ADDENDUM_VERSION = 'section_addendum_v1';
+export const SECTION_ADDENDUM_VERSION = 'section_addendum_v6';
 
 /**
  * Generates a section-specific addendum that enforces strict vertical section requirements
@@ -25,17 +25,35 @@ PROJECTION TYPE (NON-NEGOTIABLE):
 - NO 3D elements, NO depth cues - flat vertical elevation through cut plane
 - Simple cut representation - floor plates and roof silhouette only
 
+SECTION GEOMETRY RULE (TRACING REQUIREMENT):
+- Derive storey count and roof profile from the axonometric reference
+- The section silhouette must match the axon (same number of levels, same roof type, same stepping)
+- Do NOT invent new levels or change the roof form
+- Trace the vertical profile implied by the axonometric reference
+
+CUT INSTRUCTION (CRITICAL):
+- Use the sectionCutHint from the concept seed to choose a sensible cut line
+- Section cut guidance: ${sectionCutDescription}
+- Do NOT cut randomly - the cut should reveal key spatial relationships
+- Prefer cuts that show main circulation, vertical connections, and primary spaces
+
 VERTICAL CONSTRAINTS (MUST MATCH CONCEPT SEED):
 - Storeys: ${storeysDescription}
 - Roof profile: ${roofDescription}
-- Section cut location: ${sectionCutDescription}
 
-CONTENT RESTRICTIONS:
+STYLE CONTINUITY (CRITICAL):
+- Match the same ConstructaOS ink-on-paper style as the axonometric reference
+- Off-white paper texture (not pure white), thin black ink linework, calm composition, subtle tonal shading
+- Do NOT switch to blueprint style, CAD style, or technical drawing conventions
+- Maintain the same visual language and aesthetic quality as the axon reference
+- The section should feel like it was drawn by the same hand as the axonometric
+
+CONTENT RESTRICTIONS (ABSOLUTE):
 - Focus on floor plates, walls, and roof profile - architectural structure
 - Show floor levels clearly - horizontal lines indicating floor plates
 - Show roof as outline/profile matching roof type from seed
 - Can show walls as vertical lines - minimal structural representation
-- NO materials, NO textures, NO detailed construction details
+- NO people, NO materials, NO textures, NO detailed construction details
 - NO labels, NO text, NO dimensions, NO annotations
 - Can include simple ground line/context if helpful for understanding
 
@@ -43,22 +61,11 @@ GEOMETRIC REPRESENTATION:
 - Floor plates as horizontal lines showing levels
 - Roof as geometric profile matching roof type
 - Walls as vertical lines showing building edges
-- Simple cut representation - show elements cut by section plane
-- Can include minimal landscape/ground context if appropriate
+- Simplified cut representation - show elements cut by section plane
+- Can include minimal landscape/ground context if appropriate (trees, garden)
+- Can use slightly thicker lines for cut elements (restrained architectural convention)
 
-STYLE REQUIREMENTS (NEAVE BROWN STYLING - SAME AS AXONOMETRIC):
-- Neave Brown–inspired architectural language
-- Clean, precise black ink linework with subtle grayscale hatching for depth and material texture
-- Thin, consistent black linework
-- Off-white paper background
-- Subtle tonal variation only
-- Can use slightly thicker lines for cut elements (standard architectural convention)
-- Can include simple landscape/ground context (minimalist grayscale rendering)
-- Can include minimal line-drawn figures for scale (standing) - appropriate for section view
-- Human-scale proportions
-- Calm, neutral presentation suitable for early design discussion
-
-OUTPUT: A clean architectural concept section diagram in Neave Brown style. Vertical orthographic section showing floor plates, walls, and roof profile. Can include simple ground context and minimal figures for scale. No labels or dimensions.`;
+OUTPUT: A conceptual orthographic section in the same ink-on-paper style as the axonometric reference. Simplified, legible, restrained. Vertical cut showing floor plates, walls, and roof profile. Can include simple ground line. No people, no labels, no dimensions.`;
 }
 
 function getStoreysDescription(storeys: ConceptSeed['storeys']): string {
