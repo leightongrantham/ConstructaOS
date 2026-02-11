@@ -1,0 +1,789 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Renderer Core Sandbox</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      background: #f5f5f5;
+      padding: 20px;
+    }
+    
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+    
+    h1 {
+      color: #333;
+      margin-bottom: 10px;
+    }
+    
+    .subtitle {
+      color: #666;
+      margin-bottom: 30px;
+    }
+    
+    #sandbox {
+      display: flex;
+      justify-content: center;
+      margin-top: 20px;
+    }
+    
+    .view-container {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      max-width: 1400px;
+      width: 100%;
+    }
+    
+    #axon-container canvas {
+      max-width: 100%;
+      height: auto;
+    }
+    
+    .view-label {
+      font-weight: 600;
+      font-size: 18px;
+      margin-bottom: 15px;
+      color: #333;
+      border-bottom: 2px solid #007acc;
+      padding-bottom: 8px;
+    }
+    
+    canvas {
+      display: block;
+      width: 100%;
+      height: auto;
+      border: 1px solid #ddd;
+      background: white;
+      border-radius: 4px;
+    }
+    
+    .status {
+      margin-top: 20px;
+      padding: 12px;
+      background: #e8f5e9;
+      border-left: 4px solid #4caf50;
+      border-radius: 4px;
+      color: #2e7d32;
+    }
+    
+    .error {
+      background: #ffebee;
+      border-left-color: #f44336;
+      color: #c62828;
+    }
+    
+    .file-input-container {
+      margin-bottom: 20px;
+      padding: 15px;
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    
+    .file-input-container label {
+      display: block;
+      margin-bottom: 10px;
+      font-weight: 600;
+      color: #333;
+    }
+    
+    #fileInput {
+      padding: 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    
+    .button-group {
+      margin-top: 10px;
+      display: flex;
+      gap: 10px;
+    }
+    
+    button {
+      padding: 10px 20px;
+      background: #007acc;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+    }
+    
+    button:hover {
+      background: #005a9e;
+    }
+    
+    button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    
+    button.secondary {
+      background: #666;
+    }
+    
+    button.secondary:hover {
+      background: #555;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Renderer Core Sandbox</h1>
+    <p class="subtitle">Testing renderer pipeline with OpenCV, Potrace/VTracer, and AI support</p>
+    
+    <div class="file-input-container">
+      <!-- HARD DEBUG MODE: File upload and mock data disabled -->
+      <label for="fileInput" style="opacity: 0.5;">Upload Image (DISABLED - HARD DEBUG MODE):</label>
+      <input id="fileInput" type="file" accept="image/*" disabled />
+      <div class="button-group">
+        <button id="processBtn" disabled>Process Image (DISABLED)</button>
+        <button id="useDefaultBtn" class="secondary" disabled>Use Default Mock Data (DISABLED)</button>
+        <button id="toggleAIBtn" class="secondary" style="background: #666;" disabled>Toggle AI (DISABLED)</button>
+      </div>
+      <div style="margin-top: 10px; padding: 10px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 4px; color: #856404;">
+        <strong>HARD DEBUG MODE ACTIVE:</strong> Using hardcoded geometry source only. AI topology, vectorization, uploaded sketches, and default mock data are disabled.
+      </div>
+      <div style="margin-top: 15px; display: flex; gap: 15px; flex-wrap: wrap;">
+        <div id="vectorizerStatus" style="padding: 8px; background: #f3e5f5; border-radius: 4px; font-size: 12px; color: #7b1fa2;">
+          <strong>Vectorizer:</strong> <span id="vectorizerStatusText">Auto</span>
+        </div>
+        <div id="aiStatus" style="padding: 8px; background: #e3f2fd; border-radius: 4px; font-size: 12px; color: #1976d2;">
+          <strong>AI:</strong> <span id="aiStatusText">Checking...</span>
+        </div>
+      </div>
+      <div style="margin-top: 10px;">
+        <label style="display: block; margin-bottom: 5px; font-weight: 600; color: #333;">Vectorizer Selection:</label>
+        <select id="vectorizerSelect" style="padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; width: 200px;">
+          <option value="auto">Auto (VTracer → Potrace)</option>
+          <option value="vtracer">VTracer</option>
+          <option value="potrace">Potrace</option>
+        </select>
+      </div>
+    </div>
+    
+    <div id="sandbox">
+      <!-- 2.5D Axonometric View -->
+      <div class="view-container" style="display: none;">
+        <div class="view-label">2.5D Axonometric View</div>
+        <div id="axon-container"></div>
+      </div>
+    </div>
+    
+    <div id="status" class="status" style="display: none;"></div>
+  </div>
+
+  <!-- Paper.js via CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/paper@0.12.17/dist/paper-full.min.js"></script>
+  
+  <!-- Pipeline Debugging Tools -->
+  <script type="module" src="./debug-pipeline.js"></script>
+  
+  <!-- Mock Topology Renderer Test -->
+  <button id="renderMockTopologyBtn" style="margin: 10px; padding: 10px 20px; font-size: 14px;">
+    Render Mock Topology (Baseline Test)
+  </button>
+  
+  <script type="module">
+    import { runSandbox, configurePotrace, configureVTracer } from './sandbox.js';
+    import rough from 'roughjs';
+
+    const statusEl = document.getElementById('status');
+    const fileInput = document.getElementById('fileInput');
+    const processBtn = document.getElementById('processBtn');
+    const useDefaultBtn = document.getElementById('useDefaultBtn');
+    const toggleAIBtn = document.getElementById('toggleAIBtn');
+    const renderMockTopologyBtn = document.getElementById('renderMockTopologyBtn');
+    const container = document.getElementById('sandbox');
+    const aiStatusEl = document.getElementById('aiStatus');
+    const aiStatusText = document.getElementById('aiStatusText');
+    const vectorizerStatusEl = document.getElementById('vectorizerStatus');
+    const vectorizerStatusText = document.getElementById('vectorizerStatusText');
+    const vectorizerSelect = document.getElementById('vectorizerSelect');
+    
+    let currentFile = null;
+    let roughInstance = null;
+    let aiEnabled = true; // AI enabled by default
+    let selectedVectorizer = 'auto'; // 'auto', 'vtracer', or 'potrace'
+    const aiEndpointUrl = 'http://localhost:3001/api/topology/ai-clean';
+    
+    // Helper to get mock ImageData (for default sandbox)
+    function getMockImageData() {
+      const width = 600;
+      const height = 400;
+      const imageData = new ImageData(width, height);
+      const data = imageData.data;
+      
+      // Draw a white rectangle (simulating a wall outline)
+      const margin = 50;
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const idx = (y * width + x) * 4;
+          
+          // White rectangle (foreground)
+          if ((x >= margin && x < width - margin && y >= margin && y < height - margin) &&
+              (x === margin || x === width - margin - 1 || y === margin || y === height - margin - 1)) {
+            data[idx] = 255;     // R
+            data[idx + 1] = 255; // G
+            data[idx + 2] = 255; // B
+            data[idx + 3] = 255; // A
+          } else {
+            // Black background
+            data[idx] = 0;
+            data[idx + 1] = 0;
+            data[idx + 2] = 0;
+            data[idx + 3] = 255;
+          }
+        }
+      }
+      
+      return imageData;
+    }
+    
+    // Vectorizer configuration
+    // Note: Potrace/VTracer WASM files are optional - pipeline will fall back to simple edge detection if not available
+    const potraceWasmUrl = '/potrace.wasm'; // Update if your Potrace WASM is elsewhere
+    const potraceJsUrl = null; // Update if needed
+    
+    const vtracerWasmUrl = '/vtracer.wasm'; // Update if your VTracer WASM is elsewhere
+    const vtracerJsUrl = '/vtracer.js'; // Update if needed
+    
+    // Check if WASM files exist (non-blocking)
+    async function checkWasmFiles() {
+      try {
+        const potraceCheck = await fetch(potraceWasmUrl, { method: 'HEAD' }).catch(() => null);
+        if (!potraceCheck || !potraceCheck.ok) {
+          console.info('ℹ️ Potrace WASM not found. Pipeline will use simple edge detection fallback.');
+        }
+        
+        const vtracerCheck = await fetch(vtracerWasmUrl, { method: 'HEAD' }).catch(() => null);
+        if (!vtracerCheck || !vtracerCheck.ok) {
+          console.info('ℹ️ VTracer WASM not found. Will skip VTracer vectorization.');
+        }
+      } catch (error) {
+        // Non-critical check, ignore errors
+      }
+    }
+    
+    // Run check in background
+    checkWasmFiles();
+    
+    // Initialize vectorizers
+    async function initializeVectorizers() {
+      try {
+        // Configure Potrace
+        if (potraceWasmUrl) {
+          configurePotrace(potraceWasmUrl, potraceJsUrl);
+          console.log('✅ Potrace configured:', potraceWasmUrl);
+        }
+        
+        // Configure VTracer
+        if (vtracerWasmUrl) {
+          configureVTracer(vtracerWasmUrl, vtracerJsUrl);
+          console.log('✅ VTracer configured:', vtracerWasmUrl);
+        }
+        
+        updateVectorizerStatus();
+      } catch (error) {
+        console.warn('Vectorizer initialization warning:', error);
+      }
+    }
+    
+    // Update vectorizer status display
+    function updateVectorizerStatus() {
+      const hasPotrace = !!potraceWasmUrl;
+      const hasVTracer = !!vtracerWasmUrl;
+      
+      let status = '';
+      let bgColor = '#f3e5f5';
+      let textColor = '#7b1fa2';
+      
+      if (selectedVectorizer === 'auto') {
+        if (hasVTracer) {
+          status = 'Auto (VTracer available)';
+          bgColor = '#e8f5e9';
+          textColor = '#2e7d32';
+        } else if (hasPotrace) {
+          status = 'Auto (Potrace available)';
+          bgColor = '#fff3e0';
+          textColor = '#e65100';
+        } else {
+          status = 'Auto (Fallback only)';
+          bgColor = '#ffebee';
+          textColor = '#c62828';
+        }
+      } else if (selectedVectorizer === 'vtracer') {
+        if (hasVTracer) {
+          status = 'VTracer (configured)';
+          bgColor = '#e8f5e9';
+          textColor = '#2e7d32';
+        } else {
+          status = 'VTracer (not configured)';
+          bgColor = '#ffebee';
+          textColor = '#c62828';
+        }
+      } else if (selectedVectorizer === 'potrace') {
+        if (hasPotrace) {
+          status = 'Potrace (configured)';
+          bgColor = '#fff3e0';
+          textColor = '#e65100';
+        } else {
+          status = 'Potrace (not configured)';
+          bgColor = '#ffebee';
+          textColor = '#c62828';
+        }
+      }
+      
+      vectorizerStatusText.textContent = status;
+      vectorizerStatusEl.style.background = bgColor;
+      vectorizerStatusEl.style.color = textColor;
+    }
+    
+    // Initialize on load
+    initializeVectorizers();
+    
+    // Vectorizer selection change handler
+    vectorizerSelect.addEventListener('change', (e) => {
+      selectedVectorizer = e.target.value;
+      updateVectorizerStatus();
+      showStatus(`Vectorizer set to: ${selectedVectorizer}`);
+    });
+    
+    // Add diagnostics button handler (if debug tools are available)
+    window.addEventListener('load', () => {
+      if (window.debugPipeline) {
+        console.log('🔧 Debug tools loaded. Use window.debugPipeline.run() to diagnose issues');
+        
+        // Run diagnostics on load (can be disabled)
+        setTimeout(async () => {
+          try {
+            await window.debugPipeline.run({
+              aiEndpointUrl: aiEndpointUrl,
+              potraceWasmUrl: potraceWasmUrl,
+              vtracerWasmUrl: vtracerWasmUrl
+            });
+          } catch (error) {
+            console.warn('Diagnostics check failed:', error);
+          }
+        }, 1000);
+      }
+    });
+
+    // Initialize Rough.js instance once
+    async function getRoughInstance() {
+      if (!roughInstance) {
+        try {
+          // Rough.js is imported as ES module - create RoughCanvas instance
+          if (!rough) {
+            throw new Error('Rough.js module not imported');
+          }
+          
+          // Rough.js v4+ API: rough.canvas(canvas) returns RoughCanvas
+          const tempCanvas = document.createElement('canvas');
+          tempCanvas.width = 100;
+          tempCanvas.height = 100;
+          roughInstance = rough.canvas(tempCanvas);
+          
+          // Verify it has the line method
+          if (typeof roughInstance.line !== 'function') {
+            throw new Error('RoughCanvas instance missing line() method');
+          }
+          
+          console.log('Rough.js initialized successfully');
+        } catch (err) {
+          console.error('Failed to initialize Rough.js:', err);
+          // Don't throw - allow rendering without Rough.js (will use Paper.js only)
+          roughInstance = null;
+        }
+      }
+      return roughInstance;
+    }
+
+    function showStatus(message, isError = false) {
+      statusEl.textContent = message;
+      statusEl.className = isError ? 'status error' : 'status';
+      statusEl.style.display = 'block';
+    }
+
+    // Check AI server status
+    async function checkAIStatus() {
+      try {
+        const healthUrl = aiEndpointUrl.replace('/api/topology/ai-clean', '/health');
+        const response = await fetch(healthUrl);
+        const data = await response.json();
+        
+        const isAvailable = data.llm?.enabled && data.llm?.apiKeySet;
+        
+        if (isAvailable && aiEnabled) {
+          aiStatusText.textContent = 'Enabled (LLM Active)';
+          aiStatusEl.style.background = '#e8f5e9';
+          aiStatusEl.style.color = '#2e7d32';
+          toggleAIBtn.style.background = '#4caf50';
+          toggleAIBtn.textContent = 'AI: ON';
+        } else if (data.llm?.enabled && !data.llm?.apiKeySet) {
+          aiStatusText.textContent = 'Server Available (No API Key)';
+          aiStatusEl.style.background = '#fff3e0';
+          aiStatusEl.style.color = '#e65100';
+          toggleAIBtn.style.background = '#ff9800';
+          toggleAIBtn.textContent = 'AI: No Key';
+        } else if (aiEnabled) {
+          aiStatusText.textContent = 'Enabled (Heuristic Fallback)';
+          aiStatusEl.style.background = '#f3e5f5';
+          aiStatusEl.style.color = '#7b1fa2';
+          toggleAIBtn.style.background = '#9c27b0';
+          toggleAIBtn.textContent = 'AI: Fallback';
+        } else {
+          aiStatusText.textContent = 'Disabled';
+          aiStatusEl.style.background = '#e0e0e0';
+          aiStatusEl.style.color = '#616161';
+          toggleAIBtn.style.background = '#666';
+          toggleAIBtn.textContent = 'AI: OFF';
+        }
+        
+        return isAvailable;
+      } catch (error) {
+        aiStatusText.textContent = 'Server Not Available';
+        aiStatusEl.style.background = '#ffebee';
+        aiStatusEl.style.color = '#c62828';
+        toggleAIBtn.style.background = '#f44336';
+        toggleAIBtn.textContent = 'AI: Error';
+        console.warn('AI server not available:', error.message);
+        return false;
+      }
+    }
+    
+    // Toggle AI on/off
+    // Mock topology renderer (baseline test)
+    renderMockTopologyBtn.addEventListener('click', async () => {
+      try {
+        showStatus('Rendering mock topology...', false);
+        
+        const { generateMockRectangularTopology, renderMockTopology } = await import('./src/test/mock-topology.js');
+        
+        // Clear container
+        const axonContainer = document.getElementById('axon-container');
+        if (axonContainer) {
+          axonContainer.innerHTML = '';
+        }
+        
+        // Generate and render mock topology
+        const topology = generateMockRectangularTopology({
+          width: 10000,
+          depth: 8000,
+          wallThickness: 200,
+          originX: 0,
+          originY: 0
+        });
+        
+        await renderMockTopology(container || axonContainer, topology, {
+          useExtrusion: true,
+          wallHeight: 2700,
+          angle: 30,
+          width: 600,  // Smaller, more reasonable size
+          height: 400, // Smaller, more reasonable size
+          useNewGeometryPipeline: true  // Use new geometry pipeline
+        });
+        
+        showStatus('✅ Mock topology rendered successfully', false);
+        console.log('✅ Baseline renderer validation complete');
+      } catch (error) {
+        console.error('❌ Mock topology render error:', error);
+        showStatus(`Error: ${error.message}`, true);
+      }
+    });
+    
+    toggleAIBtn.addEventListener('click', () => {
+      aiEnabled = !aiEnabled;
+      checkAIStatus();
+      showStatus(`AI ${aiEnabled ? 'enabled' : 'disabled'}. Process again to apply.`);
+    });
+
+    function clearViews() {
+      const axonContainer = document.getElementById('axon-container');
+      if (axonContainer) axonContainer.innerHTML = '';
+    }
+
+    async function processImage(file) {
+      if (!file) {
+        showStatus('No file selected', true);
+        return;
+      }
+
+      if (typeof paper === 'undefined') {
+        showStatus('Error: Paper.js not loaded', true);
+        return;
+      }
+
+      showStatus('Processing image...');
+      clearViews();
+
+      try {
+        // Convert file to ImageData
+        const imageData = await fileToImageData(file);
+        
+        // Get axon container - this is where the canvas will be rendered
+        const axonContainer = document.getElementById('axon-container');
+        if (!axonContainer) {
+          throw new Error('axon-container element not found in DOM');
+        }
+        
+        // Run sandbox with image data - pass axon container directly
+        const result = await runSandboxWithImage(axonContainer, imageData);
+        
+        console.log('Processing complete:', result);
+        showStatus(`✅ Image processed successfully! Rendered 2.5D axonometric view.`);
+      } catch (err) {
+        console.error('Processing error:', err);
+        showStatus(`❌ Error: ${err.message}`, true);
+      }
+    }
+
+    async function fileToImageData(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const img = new Image();
+          img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            resolve(imageData);
+          };
+          img.onerror = () => reject(new Error('Failed to load image'));
+          img.src = e.target.result;
+        };
+        reader.onerror = () => reject(new Error('Failed to read file'));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    async function runSandboxWithImage(container, imageData) {
+      // Import sandbox functions - use the full runSandbox function instead
+      const { runSandbox } = await import('./sandbox.js');
+      
+      // Get Rough.js instance (async)
+      const rough = await getRoughInstance();
+      
+      // Use the main runSandbox function which handles everything
+      const result = await runSandbox(container, {
+        rough,
+        imageData,
+        vectorizer: selectedVectorizer, // Pass selected vectorizer
+        topology: aiEnabled ? {
+          aiClean: true,
+          aiEndpointUrl: aiEndpointUrl,
+          useLLM: true,
+          imageSize: [imageData.width, imageData.height],
+          pxToMeters: 0.01
+        } : {}
+      });
+      
+      // Show container
+      document.querySelectorAll('.view-container').forEach(el => {
+        el.style.display = 'block';
+      });
+
+      const axonContainer = document.getElementById('axon-container');
+      
+      // Canvas should already be appended by sandboxRenderAxon
+      // Just verify it's visible and properly displayed
+      if (result.axon) {
+        console.log('📦 Verifying axon canvas display:', {
+          exists: !!result.axon,
+          width: result.axon.width,
+          height: result.axon.height,
+          inDOM: result.axon.parentNode !== null,
+          parentId: result.axon.parentNode?.id || 'none',
+          containerId: axonContainer ? axonContainer.id : 'not found'
+        });
+        
+        // Ensure canvas is visible (should already be set by sandboxRenderAxon)
+        if (result.axon.parentNode === axonContainer) {
+          result.axon.style.display = 'block';
+          result.axon.style.maxWidth = '100%';
+          result.axon.style.height = 'auto';
+          console.log('✅ Axon canvas verified and displayed');
+        } else {
+          console.warn('⚠️ Canvas parent mismatch, re-appending');
+          if (axonContainer) {
+            axonContainer.appendChild(result.axon);
+            result.axon.style.display = 'block';
+            result.axon.style.maxWidth = '100%';
+            result.axon.style.height = 'auto';
+          }
+        }
+      } else {
+        console.error('❌ No axon canvas in result:', result);
+        showStatus('Error: No canvas generated', true);
+      }
+
+      return result;
+    }
+
+    async function runDefaultSandbox() {
+      if (typeof paper === 'undefined') {
+        showStatus('Error: Paper.js not loaded', true);
+        return;
+      }
+
+      showStatus('Loading default sandbox with mock data...');
+      clearViews();
+
+      try {
+        // Get Rough.js instance for default sandbox too
+        const rough = await getRoughInstance();
+        
+        // Get axon container - this is where the canvas will be rendered
+        const axonContainer = document.getElementById('axon-container');
+        if (!axonContainer) {
+          throw new Error('axon-container element not found in DOM');
+        }
+        
+        // Generate mock ImageData for testing
+        const { sandboxPreprocess } = await import('./sandbox.js');
+        const mockImageData = getMockImageData();
+        
+        console.log('🧪 Using mock data:', {
+          width: mockImageData.width,
+          height: mockImageData.height,
+          container: axonContainer.id
+        });
+        
+        const result = await runSandbox(axonContainer, { 
+          rough,
+          imageData: mockImageData,  // Pass mock ImageData
+          vectorizer: selectedVectorizer,
+          topology: aiEnabled ? {
+            aiClean: true,
+            aiEndpointUrl: aiEndpointUrl,
+            useLLM: true,
+            imageSize: [mockImageData.width, mockImageData.height],
+            pxToMeters: 0.01
+          } : {}
+        });
+        
+        console.log('Sandbox ready:', result);
+
+        // Show container
+        document.querySelectorAll('.view-container').forEach(el => {
+          el.style.display = 'block';
+        });
+
+        // Canvas should already be appended by sandboxRenderAxon
+        // Just verify it's visible
+        if (result.axon) {
+          console.log('📦 Verifying axon canvas:', result.axon.width, 'x', result.axon.height);
+          result.axon.style.display = 'block';
+          result.axon.style.maxWidth = '100%';
+          result.axon.style.height = 'auto';
+        } else {
+          console.warn('⚠️ No axon canvas in result:', result);
+          showStatus('Error: No canvas generated', true);
+        }
+        
+        showStatus(`✅ Default sandbox loaded! Rendered 2.5D axonometric view.`);
+      } catch (err) {
+        console.error('Sandbox error:', err);
+        showStatus(`❌ Error: ${err.message}`, true);
+      }
+    }
+
+    // File input handler
+    fileInput.addEventListener('change', (e) => {
+      currentFile = e.target.files[0];
+      processBtn.disabled = !currentFile;
+    });
+
+    // Process button handler
+    processBtn.addEventListener('click', () => {
+      if (currentFile) {
+        processImage(currentFile);
+      }
+    });
+
+    // Default button handler
+    useDefaultBtn.addEventListener('click', () => {
+      fileInput.value = '';
+      currentFile = null;
+      processBtn.disabled = true;
+      runDefaultSandbox();
+    });
+
+    // HARD DEBUG MODE: Initialize with hardcoded geometry only
+    window.addEventListener('load', async () => {
+      if (!container) {
+        showStatus('Error: Container element not found', true);
+        return;
+      }
+
+      // HARD DEBUG MODE: Skip AI status check and default sandbox
+      // Use hardcoded geometry directly
+      showStatus('HARD DEBUG MODE: Using hardcoded geometry source only');
+      
+      try {
+        const rough = await getRoughInstance();
+        const axonContainer = document.getElementById('axon-container');
+        if (!axonContainer) {
+          throw new Error('axon-container element not found in DOM');
+        }
+        
+        // HARD DEBUG MODE: Hardcoded geometry
+        const hardcodedWalls = [
+          { start: [-500, -300], end: [500, -300], thickness: 300, height: 2700 },
+          { start: [500, -300], end: [500, 300], thickness: 300, height: 2700 },
+          { start: [500, 300], end: [-500, 300], thickness: 300, height: 2700 },
+          { start: [-500, 300], end: [-500, -300], thickness: 300, height: 2700 }
+        ];
+        
+        const topology = {
+          walls: hardcodedWalls,
+          openings: [],
+          rooms: []
+        };
+        
+        const result = await runSandbox(axonContainer, { 
+          rough,
+          imageData: null,  // HARD DEBUG MODE: No image data
+          vectorizer: 'auto',
+          topology: {}  // HARD DEBUG MODE: No AI topology
+        });
+        
+        // Show container
+        document.querySelectorAll('.view-container').forEach(el => {
+          el.style.display = 'block';
+        });
+        
+        if (result.axon) {
+          result.axon.style.display = 'block';
+          result.axon.style.maxWidth = '100%';
+          result.axon.style.height = 'auto';
+        }
+        
+        showStatus('✅ HARD DEBUG MODE: Rendered with hardcoded geometry');
+      } catch (err) {
+        console.error('HARD DEBUG MODE error:', err);
+        showStatus(`❌ Error: ${err.message}`, true);
+      }
+    });
+  </script>
+</body>
+</html>

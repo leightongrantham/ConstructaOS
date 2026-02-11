@@ -1,0 +1,90 @@
+{
+  "walls": [
+    {
+      "id": "wall-1",
+      "start": [
+        0,
+        0
+      ],
+      "end": [
+        100,
+        0
+      ],
+      "thickness": 0.2,
+      "type": "exterior"
+    },
+    {
+      "id": "wall-2",
+      "start": [
+        100,
+        0
+      ],
+      "end": [
+        100,
+        80
+      ],
+      "thickness": 0.2,
+      "type": "exterior"
+    },
+    {
+      "id": "wall-3",
+      "start": [
+        100,
+        80
+      ],
+      "end": [
+        0,
+        80
+      ],
+      "thickness": 0.2,
+      "type": "exterior"
+    },
+    {
+      "id": "wall-4",
+      "start": [
+        0,
+        80
+      ],
+      "end": [
+        0,
+        0
+      ],
+      "thickness": 0.2,
+      "type": "exterior"
+    }
+  ],
+  "rooms": [
+    {
+      "id": "room-1",
+      "polygon": [
+        [
+          0,
+          0
+        ],
+        [
+          100,
+          0
+        ],
+        [
+          100,
+          80
+        ],
+        [
+          0,
+          80
+        ]
+      ],
+      "area_m2": 80
+    }
+  ],
+  "openings": [],
+  "meta": {
+    "scale": 0.01,
+    "bounds": {
+      "minX": 0,
+      "maxX": 100,
+      "minY": 0,
+      "maxY": 80
+    }
+  }
+}

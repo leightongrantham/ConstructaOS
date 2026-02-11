@@ -1,0 +1,216 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "point": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "minItems": 2,
+      "maxItems": 2,
+      "description": "A 2D point [x, y]"
+    },
+    "polyline": {
+      "type": "object",
+      "required": ["points"],
+      "properties": {
+        "points": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/point"
+          },
+          "minItems": 2,
+          "description": "Array of points forming the polyline"
+        },
+        "closed": {
+          "type": "boolean",
+          "description": "Whether the polyline is closed (forms a polygon)"
+        }
+      }
+    },
+    "imageSize": {
+      "type": "array",
+      "items": {
+        "type": "number",
+        "minimum": 0
+      },
+      "minItems": 2,
+      "maxItems": 2,
+      "description": "Image dimensions [width, height]"
+    },
+    "wall": {
+      "type": "object",
+      "required": ["id", "start", "end", "thickness", "type"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique identifier for the wall"
+        },
+        "start": {
+          "$ref": "#/definitions/point",
+          "description": "Start point of the wall"
+        },
+        "end": {
+          "$ref": "#/definitions/point",
+          "description": "End point of the wall"
+        },
+        "thickness": {
+          "type": "number",
+          "minimum": 0.0001,
+          "description": "Wall thickness in meters (must be > 0)"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["exterior", "interior", "structural", "partition"],
+          "description": "Type of wall"
+        }
+      }
+    },
+    "room": {
+      "type": "object",
+      "required": ["id", "polygon", "area_m2"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique identifier for the room"
+        },
+        "polygon": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/point"
+          },
+          "minItems": 3,
+          "description": "Array of points forming the room boundary polygon"
+        },
+        "area_m2": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Room area in square meters"
+        }
+      }
+    },
+    "opening": {
+      "type": "object",
+      "required": ["id", "wallId", "type", "position"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique identifier for the opening"
+        },
+        "wallId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "ID of the wall this opening belongs to"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["door", "window", "opening"],
+          "description": "Type of opening"
+        },
+        "position": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Position along the wall (0 = start, 1 = end)"
+        }
+      }
+    },
+    "bounds": {
+      "type": "object",
+      "required": ["minX", "maxX", "minY", "maxY"],
+      "properties": {
+        "minX": {
+          "type": "number"
+        },
+        "maxX": {
+          "type": "number"
+        },
+        "minY": {
+          "type": "number"
+        },
+        "maxY": {
+          "type": "number"
+        }
+      }
+    },
+    "meta": {
+      "type": "object",
+      "required": ["scale", "bounds"],
+      "properties": {
+        "scale": {
+          "type": "number",
+          "minimum": 0.0001,
+          "description": "Scale factor (pixels to meters, must be > 0)"
+        },
+        "bounds": {
+          "$ref": "#/definitions/bounds",
+          "description": "Bounding box of the geometry"
+        }
+      }
+    }
+  },
+  "inputSchema": {
+    "type": "object",
+    "required": ["polylines", "metadata"],
+    "properties": {
+      "polylines": {
+        "type": "array",
+        "items": {
+          "$ref": "#/definitions/polyline"
+        },
+        "minItems": 0,
+        "description": "Array of polylines to process"
+      },
+      "metadata": {
+        "type": "object",
+        "required": ["imageSize"],
+        "properties": {
+          "imageSize": {
+            "$ref": "#/definitions/imageSize",
+            "description": "Image dimensions [width, height]"
+          },
+          "pxToMeters": {
+            "type": "number",
+            "minimum": 0.0001,
+            "description": "Conversion factor from pixels to meters (optional, must be > 0)"
+          }
+        }
+      }
+    }
+  },
+  "outputSchema": {
+    "type": "object",
+    "required": ["walls", "rooms", "openings", "meta"],
+    "properties": {
+      "walls": {
+        "type": "array",
+        "items": {
+          "$ref": "#/definitions/wall"
+        },
+        "description": "Array of detected walls"
+      },
+      "rooms": {
+        "type": "array",
+        "items": {
+          "$ref": "#/definitions/room"
+        },
+        "description": "Array of detected rooms"
+      },
+      "openings": {
+        "type": "array",
+        "items": {
+          "$ref": "#/definitions/opening"
+        },
+        "description": "Array of detected openings (doors, windows)"
+      },
+      "meta": {
+        "$ref": "#/definitions/meta",
+        "description": "Metadata about the processed geometry"
+      }
+    }
+  }
+}
+

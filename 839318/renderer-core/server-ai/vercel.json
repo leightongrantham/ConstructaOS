@@ -1,0 +1,35 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "server.js",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/health",
+      "methods": ["GET"],
+      "dest": "/server.js"
+    },
+    {
+      "src": "/metrics",
+      "methods": ["GET"],
+      "dest": "/server.js"
+    },
+    {
+      "src": "/api/topology/ai-clean",
+      "methods": ["POST"],
+      "dest": "/server.js"
+    }
+  ],
+  "env": {
+    "NODE_ENV": "production"
+  },
+  "functions": {
+    "server.js": {
+      "maxDuration": 30
+    }
+  }
+}
+

@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Canvas Isolation Test</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: monospace;
+            background: #f5f5f5;
+        }
+        #testCanvas {
+            border: 2px solid #333;
+            background: white;
+            display: block;
+            margin: 20px 0;
+        }
+        .info {
+            background: #e8f4f8;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        .success {
+            background: #d4edda;
+            color: #155724;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>Canvas Isolation Test</h1>
+    <div class="info">
+        <strong>Purpose:</strong> Test if rendering libraries are distorting coordinates<br>
+        <strong>Method:</strong> Raw canvas 2D context, no library abstractions<br>
+        <strong>Expected:</strong> Two rectangles stacked vertically
+    </div>
+
+    <canvas id="testCanvas" width="800" height="600"></canvas>
+
+    <div id="result"></div>
+
+    <script type="module">
+        /**
+         * Canvas Isolation Test
+         * 
+         * Bypasses ALL rendering libraries (Paper.js, Konva, SVG, etc.)
+         * Uses raw canvas 2D context to verify coordinate system integrity
+         */
+
+        function testCanvasIsolation() {
+            // Get canvas element - NO library wrappers
+            const canvas = document.getElementById('testCanvas');
+            if (!canvas) {
+                throw new Error('Canvas element not found');
+            }
+
+            // Get 2D context - NO library helpers
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+                throw new Error('Could not get 2D context');
+            }
+
+            // CRITICAL: Reset transform to identity matrix
+            // This ensures no external transforms are applied
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Hardcoded projected points (ALREADY PROJECTED)
+            // First quad (bottom)
+            const p1 = { x: 200, y: 200 };
+            const p2 = { x: 400, y: 200 };
+            const p3 = { x: 400, y: 350 };
+            const p4 = { x: 200, y: 350 };
+
+            // Second quad (above first, y - 100)
+            const p5 = { x: 200, y: 100 };   // p1.y - 100
+            const p6 = { x: 400, y: 100 };   // p2.y - 100
+            const p7 = { x: 400, y: 250 };   // p3.y - 100
+            const p8 = { x: 200, y: 250 };   // p4.y - 100
+
+            // Draw first quad (bottom rectangle)
+            ctx.fillStyle = '#4a90e2'; // Blue
+            ctx.beginPath();
+            ctx.moveTo(p1.x, p1.y);
+            ctx.lineTo(p2.x, p2.y);
+            ctx.lineTo(p3.x, p3.y);
+            ctx.lineTo(p4.x, p4.y);
+            ctx.closePath();
+            ctx.fill();
+
+            // Draw second quad (top rectangle)
+            ctx.fillStyle = '#e24a4a'; // Red
+            ctx.beginPath();
+            ctx.moveTo(p5.x, p5.y);
+            ctx.lineTo(p6.x, p6.y);
+            ctx.lineTo(p7.x, p7.y);
+            ctx.lineTo(p8.x, p8.y);
+            ctx.closePath();
+            ctx.fill();
+
+            // Draw outlines for clarity
+            ctx.strokeStyle = '#000000';
+            ctx.lineWidth = 2;
+            
+            // Outline first quad
+            ctx.beginPath();
+            ctx.moveTo(p1.x, p1.y);
+            ctx.lineTo(p2.x, p2.y);
+            ctx.lineTo(p3.x, p3.y);
+            ctx.lineTo(p4.x, p4.y);
+            ctx.closePath();
+            ctx.stroke();
+
+            // Outline second quad
+            ctx.beginPath();
+            ctx.moveTo(p5.x, p5.y);
+            ctx.lineTo(p6.x, p6.y);
+            ctx.lineTo(p7.x, p7.y);
+            ctx.lineTo(p8.x, p8.y);
+            ctx.closePath();
+            ctx.stroke();
+
+            // Verify expected positions
+            const expectedBottomTop = 200;      // Top edge of bottom quad
+            const expectedBottomBottom = 350;   // Bottom edge of bottom quad
+            const expectedTopTop = 100;         // Top edge of top quad
+            const expectedTopBottom = 250;      // Bottom edge of top quad
+
+            // Check if rectangles are correctly positioned
+            const bottomQuadCorrect = (
+                p1.y === expectedBottomTop &&
+                p4.y === expectedBottomBottom &&
+                p2.y === expectedBottomTop &&
+                p3.y === expectedBottomBottom
+            );
+
+            const topQuadCorrect = (
+                p5.y === expectedTopTop &&
+                p8.y === expectedTopBottom &&
+                p6.y === expectedTopTop &&
+                p7.y === expectedTopBottom
+            );
+
+            const verticalStacking = (expectedTopBottom === expectedBottomTop - 50); // 50px gap expected
+
+            // Get current transform matrix for debugging
+            const transform = ctx.getTransform();
+            const isIdentity = (
+                transform.a === 1 && transform.b === 0 &&
+                transform.c === 0 && transform.d === 1 &&
+                transform.e === 0 && transform.f === 0
+            );
+
+            return {
+                success: bottomQuadCorrect && topQuadCorrect && verticalStacking,
+                bottomQuadCorrect,
+                topQuadCorrect,
+                verticalStacking,
+                isIdentity,
+                transform: {
+                    a: transform.a, b: transform.b,
+                    c: transform.c, d: transform.d,
+                    e: transform.e, f: transform.f
+                },
+                points: {
+                    bottom: { p1, p2, p3, p4 },
+                    top: { p5, p6, p7, p8 }
+                }
+            };
+        }
+
+        // Run test
+        try {
+            const result = testCanvasIsolation();
+            
+            const resultDiv = document.getElementById('result');
+            
+            if (result.success && result.isIdentity) {
+                resultDiv.innerHTML = `
+                    <div class="success">
+                        <strong>✅ TEST PASSED</strong><br>
+                        - Bottom quad correctly positioned<br>
+                        - Top quad correctly positioned<br>
+                        - Rectangles are stacked vertically<br>
+                        - Transform matrix is identity (no distortion)<br>
+                        <br>
+                        <strong>Conclusion:</strong> Canvas coordinate system is clean. 
+                        Any distortion is NOT from canvas transforms.
+                    </div>
+                `;
+            } else {
+                let issues = [];
+                if (!result.bottomQuadCorrect) issues.push('Bottom quad position incorrect');
+                if (!result.topQuadCorrect) issues.push('Top quad position incorrect');
+                if (!result.verticalStacking) issues.push('Rectangles not stacked vertically');
+                if (!result.isIdentity) {
+                    issues.push(`Transform matrix is NOT identity: a=${result.transform.a}, b=${result.transform.b}, c=${result.transform.c}, d=${result.transform.d}, e=${result.transform.e}, f=${result.transform.f}`);
+                }
+                
+                resultDiv.innerHTML = `
+                    <div class="error">
+                        <strong>❌ TEST FAILED</strong><br>
+                        Issues detected:<br>
+                        ${issues.map(issue => `- ${issue}`).join('<br>')}
+                        <br>
+                        <strong>Conclusion:</strong> Canvas coordinate system may be distorted by external transforms.
+                    </div>
+                `;
+            }
+
+            // Log detailed results to console
+            console.log('Canvas Isolation Test Results:', result);
+            
+        } catch (error) {
+            document.getElementById('result').innerHTML = `
+                <div class="error">
+                    <strong>❌ TEST ERROR</strong><br>
+                    ${error.message}
+                </div>
+            `;
+            console.error('Canvas Isolation Test Error:', error);
+        }
+    </script>
+</body>
+</html>
+

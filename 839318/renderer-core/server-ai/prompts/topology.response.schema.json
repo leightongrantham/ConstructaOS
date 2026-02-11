@@ -1,0 +1,146 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["walls", "rooms", "openings", "meta"],
+  "properties": {
+    "walls": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "start", "end", "thickness", "type"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Unique identifier for the wall"
+          },
+          "start": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 2,
+            "maxItems": 2,
+            "description": "Start point [x, y] in meters"
+          },
+          "end": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 2,
+            "maxItems": 2,
+            "description": "End point [x, y] in meters"
+          },
+          "thickness": {
+            "type": "number",
+            "minimum": 0.0001,
+            "description": "Wall thickness in meters (must be > 0)"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["exterior", "interior", "structural", "partition"],
+            "description": "Type of wall"
+          }
+        }
+      },
+      "description": "Array of detected walls"
+    },
+    "rooms": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "polygon", "area_m2"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Unique identifier for the room"
+          },
+          "polygon": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "minItems": 3,
+            "description": "Array of points forming the room boundary polygon"
+          },
+          "area_m2": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Room area in square meters"
+          }
+        }
+      },
+      "description": "Array of detected rooms"
+    },
+    "openings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "wallId", "type", "position"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Unique identifier for the opening"
+          },
+          "wallId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "ID of the wall this opening belongs to"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["door", "window", "opening"],
+            "description": "Type of opening"
+          },
+          "position": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Position along the wall (0 = start, 1 = end)"
+          }
+        }
+      },
+      "description": "Array of detected openings (doors, windows)"
+    },
+    "meta": {
+      "type": "object",
+      "required": ["scale", "bounds"],
+      "properties": {
+        "scale": {
+          "type": "number",
+          "minimum": 0.0001,
+          "description": "Scale factor (pixels to meters, must be > 0)"
+        },
+        "bounds": {
+          "type": "object",
+          "required": ["minX", "maxX", "minY", "maxY"],
+          "properties": {
+            "minX": {
+              "type": "number"
+            },
+            "maxX": {
+              "type": "number"
+            },
+            "minY": {
+              "type": "number"
+            },
+            "maxY": {
+              "type": "number"
+            }
+          },
+          "description": "Bounding box of the geometry"
+        }
+      },
+      "description": "Metadata about the processed geometry"
+    }
+  }
+}
+

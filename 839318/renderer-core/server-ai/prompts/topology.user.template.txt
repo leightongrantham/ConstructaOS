@@ -1,0 +1,10 @@
+Analyze the following architectural polylines and extract the building topology.
+
+POLYLINES:
+{{POLYLINES_JSON}}
+
+METADATA:
+{{METADATA_JSON}}
+
+Extract walls, rooms, and openings according to the rules. Output only the JSON response matching the schema.
+
