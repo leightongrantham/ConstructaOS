@@ -19,7 +19,7 @@ const ALLOWED_ORIGINS = [
 ];
 
 function setCorsHeaders(req: VercelRequest, res: VercelResponse): void {
-  const origin = req.headers.origin;
+  const origin = req.headers?.origin;
   if (origin && ALLOWED_ORIGINS.some((re) => re.test(origin))) {
     res.setHeader('Access-Control-Allow-Origin', origin);
   }
@@ -27,10 +27,8 @@ function setCorsHeaders(req: VercelRequest, res: VercelResponse): void {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
 }
-import { geocodeAddress } from '../src/services/site/geocodeAddress.js';
-import { queryNearbyBuildingsOverpass } from '../src/services/site/queryNearbyBuildingsOverpass.js';
-import { selectPrimaryBuilding } from '../src/services/site/selectPrimaryBuilding.js';
-import { inferExistingBaseline } from '../src/services/site/inferExistingBaseline.js';
+
+// Types imported for type annotations only (no runtime load)
 import type { ExistingBaseline } from '../src/services/site/inferExistingBaseline.js';
 
 interface SiteLookupRequest {
@@ -126,20 +124,20 @@ export default async function handler(
   req: VercelRequest,
   res: VercelResponse
 ): Promise<void> {
-  setCorsHeaders(req, res);
-
-  if (req.method === 'OPTIONS') {
-    res.status(204).end();
-    return;
-  }
-
-  if (req.method !== 'POST') {
-    res.status(405).json({ error: 'Method not allowed. Use POST.' });
-    return;
-  }
-
   try {
-    const body = req.body as SiteLookupRequest;
+    setCorsHeaders(req, res);
+
+    if (req.method === 'OPTIONS') {
+      res.status(204).end();
+      return;
+    }
+
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed. Use POST.' });
+      return;
+    }
+
+    const body = (req.body ?? {}) as SiteLookupRequest;
 
     // Validate request body
     if (!body.query && (typeof body.lat !== 'number' || typeof body.lng !== 'number')) {
@@ -148,6 +146,19 @@ export default async function handler(
       });
       return;
     }
+
+    // Dynamic import to defer load until POST (avoids cold-start issues)
+    const [
+      { geocodeAddress },
+      { queryNearbyBuildingsOverpass },
+      { selectPrimaryBuilding },
+      { inferExistingBaseline },
+    ] = await Promise.all([
+      import('../src/services/site/geocodeAddress.js'),
+      import('../src/services/site/queryNearbyBuildingsOverpass.js'),
+      import('../src/services/site/selectPrimaryBuilding.js'),
+      import('../src/services/site/inferExistingBaseline.js'),
+    ]);
 
     let lat: number;
     let lng: number;
@@ -258,12 +269,16 @@ export default async function handler(
     res.status(200).json(response);
   } catch (error) {
     console.error('Error in site-lookup endpoint:', error);
-    
-    if (!res.headersSent) {
-      res.status(500).json({
-        error: 'Internal server error',
-        message: error instanceof Error ? error.message : 'Unknown error occurred',
-      });
+    try {
+      if (!res.headersSent) {
+        setCorsHeaders(req, res);
+        res.status(500).json({
+          error: 'Internal server error',
+          message: error instanceof Error ? error.message : 'Unknown error occurred',
+        });
+      }
+    } catch (fallbackErr) {
+      console.error('Fallback error handler failed:', fallbackErr);
     }
   }
 }
