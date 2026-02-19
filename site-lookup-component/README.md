@@ -7,13 +7,13 @@ React component for address/site lookup with footprint confirmation. Calls the a
 ### From GitHub (recommended)
 
 ```bash
-npm install "github:leightongrantham/constructaos-m1#main:site-lookup-component"
+npm install "github:leightongrantham/constructaos#main:site-lookup-component"
 ```
 
 For a specific branch:
 
 ```bash
-npm install "github:leightongrantham/constructaos-m1#your-branch:site-lookup-component"
+npm install "github:leightongrantham/constructaos#your-branch:site-lookup-component"
 ```
 
 ### From local path
@@ -79,7 +79,7 @@ interface SiteLookupResult {
 
    ```json
    "dependencies": {
-     "@constructaos/site-lookup": "github:leightongrantham/constructaos-m1#main:site-lookup-component"
+     "@constructaos/site-lookup": "github:leightongrantham/constructaos#main:site-lookup-component"
    }
    ```
 
