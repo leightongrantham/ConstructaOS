@@ -1,0 +1,43 @@
+{
+  "name": "ai-render-service",
+  "version": "1.0.0",
+  "description": "AI render service",
+  "main": "dist/index.js",
+  "type": "module",
+  "engines": {
+    "node": "20.x"
+  },
+  "scripts": {
+    "build": "npm run lint:deprecated && tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "type-check": "tsc --noEmit",
+    "test:local": "tsx test/runLocalRender.ts",
+    "test:sanity": "tsx test/sanity-check.ts",
+    "lint:deprecated": "node scripts/lint-deprecated.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@vercel/node": "^5.5.20",
+    "canvas": "^3.2.0",
+    "cors": "^2.8.5",
+    "dommatrix": "^0.1.1",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "multer": "^1.4.5-lts.1",
+    "openai": "^4.20.0",
+    "pdfjs-dist": "^5.4.530"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^4.17.21",
+    "@types/multer": "^1.4.11",
+    "@types/node": "^20.0.0",
+    "@types/pdfjs-dist": "^2.10.377",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.0"
+  }
+}

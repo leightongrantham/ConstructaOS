@@ -1,0 +1,20 @@
+{
+  "framework": null,
+  "functions": {
+    "api/**/*.ts": {
+      "maxDuration": 60
+    }
+  },
+  "rewrites": [
+    { "source": "/api/render", "destination": "/api/api/render" },
+    { "source": "/api/geocode", "destination": "/api/api/geocode" },
+    { "source": "/api/infer-existing-context", "destination": "/api/api/infer-existing-context" },
+    { "source": "/api/build-site-context", "destination": "/api/api/build-site-context" },
+    { "source": "/api/test/concept/:path*", "destination": "/api/api/test/concept/:path*" },
+    { "source": "/api/test/openai", "destination": "/api/api/test/openai" },
+    { "source": "/storage/:path*", "destination": "/api/api/storage/:path*" },
+    { "source": "/render", "destination": "/api/render" },
+    { "source": "/health", "destination": "/api/health" },
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ]
+}

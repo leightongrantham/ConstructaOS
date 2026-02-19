@@ -1,0 +1,39 @@
+# Development files
+node_modules/
+.env
+.env.local
+.env.*.local
+
+# Test files (root only - keep api/test/ for endpoints)
+/test/
+/tests/
+*.test.ts
+*.test.js
+*.spec.ts
+*.spec.js
+
+# Build artifacts (Vercel builds from source)
+dist/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Documentation (optional - keep if you want them deployed)
+# README.md
+# docs/
+
+# Git files
+.git/
+.gitignore
+
+# Other
+.DS_Store
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
