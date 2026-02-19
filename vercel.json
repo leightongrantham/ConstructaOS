@@ -1,0 +1,33 @@
+{
+  "functions": {
+    "api/[...].ts": {
+      "maxDuration": 60
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/render",
+      "destination": "/api/render"
+    },
+    {
+      "source": "/health",
+      "destination": "/api/health"
+    },
+    {
+      "source": "/api/geocode",
+      "destination": "/api/api/geocode"
+    },
+    {
+      "source": "/api/infer-existing-context",
+      "destination": "/api/api/infer-existing-context"
+    },
+    {
+      "source": "/api/build-site-context",
+      "destination": "/api/api/build-site-context"
+    },
+    {
+      "source": "/test/concept/:path*",
+      "destination": "/api/test/concept/:path*"
+    }
+  ]
+}

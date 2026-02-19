@@ -1,0 +1,1652 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Render Service - Demo</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      background: #f5f5f5;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      background: white;
+      padding: 30px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+
+    h1 {
+      color: #333;
+      margin-bottom: 10px;
+    }
+
+    .subtitle {
+      color: #666;
+      margin-bottom: 30px;
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 600;
+      color: #333;
+    }
+
+    input[type="text"],
+    select {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+
+    input[type="file"] {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+      background: white;
+    }
+
+    button {
+      background: #007acc;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 4px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      width: 100%;
+      margin-top: 10px;
+    }
+
+    button:hover {
+      background: #005a9e;
+    }
+
+    button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+
+    .status {
+      margin-top: 20px;
+      padding: 12px;
+      border-radius: 4px;
+      display: none;
+    }
+
+    .status.success {
+      background: #e8f5e9;
+      border-left: 4px solid #4caf50;
+      color: #2e7d32;
+      display: block;
+    }
+
+    .status.error {
+      background: #ffebee;
+      border-left: 4px solid #f44336;
+      color: #c62828;
+      display: block;
+    }
+
+    .status.info {
+      background: #e3f2fd;
+      border-left: 4px solid #2196f3;
+      color: #1565c0;
+      display: block;
+    }
+
+    #result-container {
+      margin-top: 30px;
+      display: none;
+    }
+
+    #result-container.show {
+      display: block;
+    }
+
+    #result-image {
+      max-width: 100%;
+      height: auto;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      margin-top: 15px;
+    }
+
+    .result-info {
+      margin-top: 15px;
+      padding: 12px;
+      background: #f5f5f5;
+      border-radius: 4px;
+      font-size: 14px;
+      color: #666;
+    }
+
+    .result-info strong {
+      color: #333;
+    }
+
+    .prompt-section {
+      margin-top: 20px;
+      margin-bottom: 20px;
+    }
+
+    .prompt-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px;
+      background: #f0f0f0;
+      border-radius: 4px;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .prompt-header:hover {
+      background: #e0e0e0;
+    }
+
+    .prompt-header h3 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 600;
+      color: #333;
+    }
+
+    .prompt-toggle {
+      font-size: 20px;
+      color: #666;
+      transition: transform 0.2s;
+    }
+
+    .prompt-toggle.expanded {
+      transform: rotate(180deg);
+    }
+
+    .prompt-content {
+      display: none;
+      margin-top: 10px;
+      padding: 15px;
+      background: #f9f9f9;
+      border: 1px solid #e0e0e0;
+      border-radius: 4px;
+      max-height: 500px;
+      overflow-y: auto;
+    }
+
+    .prompt-content.show {
+      display: block;
+    }
+
+    .prompt-text {
+      font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+      font-size: 12px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      color: #333;
+      margin: 0;
+    }
+
+    .radio-group {
+      display: flex;
+      gap: 20px;
+      margin-top: 8px;
+    }
+
+    .radio-option {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .radio-option input[type="radio"] {
+      width: auto;
+      margin: 0;
+    }
+
+    .radio-option label {
+      margin: 0;
+      font-weight: normal;
+      cursor: pointer;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    .disabled-section {
+      opacity: 0.5;
+      pointer-events: none;
+    }
+
+    .section-divider {
+      margin: 30px 0;
+      border-top: 1px solid #ddd;
+    }
+
+    .section-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 20px;
+    }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+
+    @media (max-width: 768px) {
+      .form-row {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>AI Render Service</h1>
+    <p class="subtitle">Generate architectural renderings from sketches</p>
+
+    <div class="section-divider"></div>
+    <h2 class="section-title">Generate Concept Renders</h2>
+    <p style="color: #666; margin-bottom: 20px;">Create architectural concept views with consistent design across axonometric, plan, and section views.</p>
+
+    <div class="form-group" style="margin-bottom: 20px; padding: 15px; background: #f0f0f0; border-radius: 4px;">
+      <label for="preset-select" style="font-weight: 600;">Quick Presets (for rapid iteration)</label>
+      <select id="preset-select" style="margin-top: 8px;">
+        <option value="">Select a preset...</option>
+        <option value="suburban-extension">Suburban rear extension, 2-storey, pitched roof</option>
+        <option value="urban-infill">Urban infill new build, 3+ storey, flat roof</option>
+        <option value="rural-conversion">Rural conversion, 2-storey, mixed roof</option>
+        <option value="suburban-renovation">Suburban renovation</option>
+        <option value="urban-terrace-refresh">Urban terrace refresh</option>
+      </select>
+    </div>
+
+    <form id="render-form">
+      <div class="form-group">
+        <label for="projectId">Project ID *</label>
+        <input type="text" id="projectId" name="projectId" required placeholder="Enter project ID" value="test-project-123">
+      </div>
+
+      <div class="section-divider" id="existing-building-section"></div>
+      <div id="existing-building-content">
+        <h2 class="section-title">Existing building (if applicable)</h2>
+        <p style="color: #666; margin-bottom: 20px; font-size: 14px;">Fill in these fields only if you're working with an existing building (extension, renovation, or conversion).</p>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="existingBuildingForm">Existing Building Form</label>
+          <select id="existingBuildingForm" name="existingBuildingForm">
+            <option value="">Select existing building form...</option>
+            <option value="detached">Detached</option>
+            <option value="semi_detached">Semi-detached</option>
+            <option value="terraced">Terraced</option>
+            <option value="infill">Infill</option>
+          </select>
+          <span class="estimated-label" id="existingBuildingForm-estimated" style="display: none; font-size: 12px; color: #666; font-style: italic; margin-top: 4px;">Estimated from map data</span>
+        </div>
+
+        <div class="form-group">
+          <label for="existingOrientation">Existing Orientation</label>
+          <select id="existingOrientation" name="existingOrientation">
+            <option value="">Select existing orientation...</option>
+            <option value="north_facing_rear">North-facing rear</option>
+            <option value="south_facing_rear">South-facing rear</option>
+            <option value="east">East</option>
+            <option value="west">West</option>
+          </select>
+          <span class="estimated-label" id="existingOrientation-estimated" style="display: none; font-size: 12px; color: #666; font-style: italic; margin-top: 4px;">Estimated from map data</span>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="existingDensity">Existing Site Density</label>
+        <select id="existingDensity" name="existingDensity">
+          <option value="">Select existing density...</option>
+          <option value="suburban">Suburban</option>
+          <option value="urban">Urban</option>
+          <option value="rural">Rural</option>
+        </select>
+        <span class="estimated-label" id="existingDensity-estimated" style="display: none; font-size: 12px; color: #666; font-style: italic; margin-top: 4px;">Estimated from map data</span>
+      </div>
+      </div>
+
+      <div class="section-divider"></div>
+      <h2 class="section-title">Site Location</h2>
+
+      <div class="form-group">
+        <label for="address">Address / Postcode</label>
+        <div style="display: flex; gap: 10px;">
+          <input type="text" id="address" name="address" placeholder="Enter address or postcode" style="flex: 1;">
+          <button type="button" id="lookup-btn" style="width: auto; margin: 0; white-space: nowrap;">Lookup site context</button>
+        </div>
+      </div>
+
+      <div class="form-group" id="location-display" style="display: none;">
+        <div style="padding: 12px; background: #e3f2fd; border-left: 4px solid #2196f3; border-radius: 4px; color: #1565c0;">
+          <strong>Location:</strong> <span id="location-name"></span>
+        </div>
+      </div>
+
+      <div class="section-divider"></div>
+      <h2 class="section-title">What you want to design</h2>
+
+      <div class="form-group">
+        <label for="projectType">Project Type *</label>
+        <select id="projectType" name="projectType" required>
+          <option value="">Select project type...</option>
+          <option value="extension">Extension</option>
+          <option value="renovation">Renovation</option>
+          <option value="new_build">New Build</option>
+          <option value="conversion">Conversion</option>
+        </select>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="buildingForm">Building Form *</label>
+          <select id="buildingForm" name="buildingForm" required>
+            <option value="">Select building form...</option>
+            <option value="detached">Detached</option>
+            <option value="semi_detached">Semi-detached</option>
+            <option value="terraced">Terraced</option>
+            <option value="infill">Infill</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="storeys">Number of Storeys *</label>
+          <select id="storeys" name="storeys" required>
+            <option value="">Select storeys...</option>
+            <option value="one">1</option>
+            <option value="two">2</option>
+            <option value="three_plus">3+</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="numberOfPlots">Number of Plots *</label>
+          <select id="numberOfPlots" name="numberOfPlots" required>
+            <option value="">Select number of plots...</option>
+            <option value="one">1</option>
+            <option value="two">2</option>
+            <option value="three_to_five">3-5</option>
+            <option value="five_to_ten">5-10</option>
+          </select>
+        </div>
+
+        <div class="form-group" id="floorAreaRange-group">
+          <label for="floorAreaRange">Floor Area Range (m²) *</label>
+          <select id="floorAreaRange" name="floorAreaRange">
+            <option value="">Select floor area range...</option>
+            <option value="50_75">50–75</option>
+            <option value="75_100">75–100</option>
+            <option value="100_150">100–150</option>
+            <option value="150_200">150–200</option>
+            <option value="200_plus">200+</option>
+          </select>
+        </div>
+
+        <div class="form-group" id="totalFloorAreaRange-group" style="display: none;">
+          <label for="totalFloorAreaRange">Total Floor Area Range (m²) *</label>
+          <select id="totalFloorAreaRange" name="totalFloorAreaRange">
+            <option value="">Select total floor area range...</option>
+            <option value="50_75">50–75</option>
+            <option value="75_100">75–100</option>
+            <option value="100_150">100–150</option>
+            <option value="150_200">150–200</option>
+            <option value="200_plus">200+</option>
+          </select>
+        </div>
+
+        <div class="form-group" id="additionalFloorAreaRange-group" style="display: none;">
+          <label for="additionalFloorAreaRange">Additional Floor Area Range (m²) *</label>
+          <select id="additionalFloorAreaRange" name="additionalFloorAreaRange">
+            <option value="">Select additional floor area range...</option>
+            <option value="50_75">50–75</option>
+            <option value="75_100">75–100</option>
+            <option value="100_150">100–150</option>
+            <option value="150_200">150–200</option>
+            <option value="200_plus">200+</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-group" id="renovationScope-group" style="display: none;">
+        <label for="renovationScope">Renovation Scope *</label>
+        <select id="renovationScope" name="renovationScope">
+          <option value="">Select renovation scope...</option>
+          <option value="Light refresh">Light refresh</option>
+          <option value="Reconfigure layout">Reconfigure layout</option>
+          <option value="Deep retrofit">Deep retrofit</option>
+          <option value="Modernise (no extension)">Modernise (no extension)</option>
+        </select>
+      </div>
+
+      <div class="form-group" id="extensionType-group" style="display: none;">
+        <label for="extensionType">Extension Type *</label>
+        <select id="extensionType" name="extensionType">
+          <option value="">Select extension type...</option>
+          <option value="rear">Rear</option>
+          <option value="side">Side</option>
+          <option value="side_and_rear">Side and Rear</option>
+          <option value="wrap_around">Wrap Around</option>
+          <option value="two_storey">Two Storey</option>
+          <option value="single_storey">Single Storey</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="footprintScale">Footprint Scale</label>
+        <select id="footprintScale" name="footprintScale">
+          <option value="">Select footprint scale...</option>
+          <option value="compact">Compact</option>
+          <option value="medium">Medium</option>
+          <option value="wide">Wide</option>
+        </select>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="bedrooms">Bedrooms *</label>
+          <select id="bedrooms" name="bedrooms" required>
+            <option value="">Select bedrooms...</option>
+            <option value="one">1</option>
+            <option value="two">2</option>
+            <option value="three">3</option>
+            <option value="four_plus">4+</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="bathrooms">Bathrooms *</label>
+          <select id="bathrooms" name="bathrooms" required>
+            <option value="">Select bathrooms...</option>
+            <option value="one">1</option>
+            <option value="two">2</option>
+            <option value="three_plus">3+</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="kitchenType">Kitchen Arrangement *</label>
+        <select id="kitchenType" name="kitchenType" required>
+          <option value="">Select kitchen arrangement...</option>
+          <option value="open_plan">Open-plan</option>
+          <option value="semi_open">Semi-open</option>
+          <option value="separate">Separate</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="livingSpaces">Living Spaces *</label>
+        <select id="livingSpaces" name="livingSpaces" required>
+          <option value="">Select living spaces...</option>
+          <option value="single_main_space">Single main space</option>
+          <option value="multiple_living_areas">Multiple living areas</option>
+        </select>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="roofType">Roof Type *</label>
+          <select id="roofType" name="roofType" required>
+            <option value="">Select roof type...</option>
+            <option value="flat">Flat</option>
+            <option value="pitched">Pitched</option>
+            <option value="mixed">Mixed</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="massingPreference">Massing Preference *</label>
+          <select id="massingPreference" name="massingPreference" required>
+            <option value="">Select massing preference...</option>
+            <option value="split_volumes">Split volumes</option>
+            <option value="stepped">Stepped</option>
+            <option value="simple_compact">Simple/compact</option>
+            <option value="linear_elongated">Linear/elongated</option>
+            <option value="courtyard">Courtyard</option>
+            <option value="vertical_tall">Vertical/Tall</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="orientation">Proposed Orientation</label>
+          <select id="orientation" name="orientation">
+            <option value="">Select orientation...</option>
+            <option value="north_facing_rear">North-facing rear</option>
+            <option value="south_facing_rear">South-facing rear</option>
+            <option value="east">East</option>
+            <option value="west">West</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="density">Proposed Density</label>
+          <select id="density" name="density">
+            <option value="">Select density...</option>
+            <option value="suburban">Suburban</option>
+            <option value="urban">Urban</option>
+            <option value="rural">Rural</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="outputType">Output Type *</label>
+        <select id="outputType" name="outputType" required>
+          <option value="">Select output type...</option>
+          <option value="concept_axonometric">Concept Axonometric</option>
+          <option value="concept_plan">Concept Plan</option>
+          <option value="concept_section">Concept Section</option>
+        </select>
+      </div>
+
+      <div class="section-divider"></div>
+
+      <button type="submit" id="submit-btn">Generate Rendering</button>
+    </form>
+
+    <div id="status" class="status"></div>
+
+    <div id="result-container">
+      <h2>Result</h2>
+      
+      <div class="prompt-section">
+        <div class="prompt-header" id="prompt-header">
+          <h3>Generated Prompt</h3>
+          <span class="prompt-toggle" id="prompt-toggle">▼</span>
+        </div>
+        <div class="prompt-content" id="prompt-content">
+          <pre class="prompt-text" id="prompt-text"></pre>
+        </div>
+      </div>
+
+      <img id="result-image" alt="Generated rendering">
+      <div class="result-info">
+        <div><strong>Model:</strong> <span id="result-model"></span></div>
+        <div><strong>Prompt Version:</strong> <span id="result-prompt-version"></span></div>
+        <div><strong>Render Type:</strong> <span id="result-render-type"></span></div>
+        <div id="result-concept-id" style="display: none;"><strong>Concept ID:</strong> <span id="result-concept-id-value"></span></div>
+      </div>
+
+      <!-- Generate additional views (shown after axon is created) -->
+      <div id="render-concept-actions" style="margin-top: 20px; padding: 15px; background: #e8f5e9; border-left: 4px solid #4caf50; border-radius: 4px; display: none;">
+        <h4 style="margin: 0 0 10px 0; color: #2e7d32;">✓ Concept Created - Generate Correlated Views</h4>
+        <p style="margin: 0 0 15px 0; font-size: 14px; color: #2e7d32;">Generate plan and section views using the same concept seed for consistency.</p>
+        <button type="button" id="render-generate-plan-btn" style="width: auto; display: inline-block; margin-right: 10px; margin-bottom: 10px;">Generate Plan</button>
+        <button type="button" id="render-generate-section-btn" style="width: auto; display: inline-block; margin-bottom: 10px;">Generate Section</button>
+        <div id="render-plan-result" style="margin-top: 15px;"></div>
+        <div id="render-section-result" style="margin-top: 15px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const form = document.getElementById('render-form');
+    const submitBtn = document.getElementById('submit-btn');
+    const status = document.getElementById('status');
+    const resultContainer = document.getElementById('result-container');
+    const resultImage = document.getElementById('result-image');
+    const resultModel = document.getElementById('result-model');
+    const resultPromptVersion = document.getElementById('result-prompt-version');
+    const resultRenderType = document.getElementById('result-render-type');
+    const resultConceptId = document.getElementById('result-concept-id');
+    const resultConceptIdValue = document.getElementById('result-concept-id-value');
+    const renderConceptActions = document.getElementById('render-concept-actions');
+    const renderConceptSeedPanel = document.getElementById('render-concept-seed-panel');
+    const renderConceptSeedJson = document.getElementById('render-concept-seed-json');
+    const renderPlanResult = document.getElementById('render-plan-result');
+    const renderSectionResult = document.getElementById('render-section-result');
+    const renderGeneratePlanBtn = document.getElementById('render-generate-plan-btn');
+    const renderGenerateSectionBtn = document.getElementById('render-generate-section-btn');
+    const promptText = document.getElementById('prompt-text');
+    const promptHeader = document.getElementById('prompt-header');
+    const promptContent = document.getElementById('prompt-content');
+    const promptToggle = document.getElementById('prompt-toggle');
+    // API URL configuration:
+    // - On localhost: use http://localhost:3001 (local dev server)
+    // - On deployed (Vercel): use same origin (empty string = relative URLs)
+    // Default to same origin (relative URLs) unless explicitly on localhost
+    const hostname = window.location.hostname || window.location.host || '';
+    const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('localhost:');
+    // Only use localhost URL if we're explicitly on localhost, otherwise use same origin
+    const API_URL = (hostname === 'localhost' || hostname === '127.0.0.1') ? 'http://localhost:3001' : '';
+    
+    // Debug logging to help diagnose issues
+    console.log('API configuration:', { 
+      hostname, 
+      origin: window.location.origin,
+      isLocalhost, 
+      API_URL: API_URL || '(same origin)' 
+    });
+
+    // Store current concept state
+    let currentConceptId = null;
+    let currentProjectId = null;
+
+    // Site location elements
+    const addressInput = document.getElementById('address');
+    const lookupBtn = document.getElementById('lookup-btn');
+    const locationDisplay = document.getElementById('location-display');
+    const locationName = document.getElementById('location-name');
+    
+    // Store site context summary and geocode result for use in render request
+    let siteContextSummary = null;
+    let geocodeResult = null;
+
+    // No additional initialization needed
+
+    // Preset scenarios
+    const presetSelect = document.getElementById('preset-select');
+    
+    const presets = {
+      'suburban-extension': {
+        projectType: 'extension',
+        existingBuildingForm: 'semi_detached',
+        existingDensity: 'suburban',
+        buildingForm: 'semi_detached',
+        storeys: 'two',
+        numberOfPlots: 'one',
+        floorAreaRange: '100_150',
+        footprintScale: 'medium',
+        bedrooms: 'three',
+        bathrooms: 'two',
+        kitchenType: 'open_plan',
+        livingSpaces: 'single_main_space',
+        roofType: 'pitched',
+        massingPreference: 'simple_compact',
+        density: 'suburban',
+        outputType: 'concept_axonometric',
+      },
+      'urban-infill': {
+        projectType: 'new_build',
+        existingBuildingForm: '',
+        existingDensity: '',
+        buildingForm: 'infill',
+        storeys: 'three_plus',
+        numberOfPlots: 'one',
+        totalFloorAreaRange: '100_150',
+        footprintScale: 'compact',
+        bedrooms: 'two',
+        bathrooms: 'one',
+        kitchenType: 'open_plan',
+        livingSpaces: 'single_main_space',
+        roofType: 'flat',
+        massingPreference: 'vertical_tall',
+        density: 'urban',
+        outputType: 'concept_axonometric',
+      },
+      'rural-conversion': {
+        projectType: 'conversion',
+        existingBuildingForm: 'detached',
+        existingDensity: 'rural',
+        buildingForm: 'detached',
+        storeys: 'two',
+        numberOfPlots: 'one',
+        floorAreaRange: '150_200',
+        footprintScale: 'wide',
+        bedrooms: 'three',
+        bathrooms: 'two',
+        kitchenType: 'semi_open',
+        livingSpaces: 'multiple_living_areas',
+        roofType: 'mixed',
+        massingPreference: 'simple_compact',
+        density: 'rural',
+        outputType: 'concept_axonometric',
+      },
+      'suburban-renovation': {
+        projectType: 'renovation',
+        existingBuildingForm: 'detached',
+        existingDensity: 'suburban',
+        buildingForm: 'detached',
+        storeys: 'two',
+        numberOfPlots: 'one',
+        renovationScope: 'Reconfigure layout',
+        bedrooms: 'three',
+        bathrooms: 'two',
+        kitchenType: 'open_plan',
+        livingSpaces: 'single_main_space',
+        roofType: 'pitched',
+        massingPreference: 'simple_compact',
+        density: 'suburban',
+        outputType: 'concept_axonometric',
+      },
+      'urban-terrace-refresh': {
+        projectType: 'renovation',
+        existingBuildingForm: 'terraced',
+        existingDensity: 'urban',
+        buildingForm: 'terraced',
+        storeys: 'two',
+        numberOfPlots: 'one',
+        renovationScope: 'Light refresh',
+        bedrooms: 'two',
+        bathrooms: 'one',
+        kitchenType: 'semi_open',
+        livingSpaces: 'multiple_living_areas',
+        roofType: 'pitched',
+        massingPreference: 'simple_compact',
+        density: 'urban',
+        outputType: 'concept_axonometric',
+      },
+    };
+
+    // Load preset into form
+    presetSelect.addEventListener('change', (e) => {
+      const presetKey = e.target.value;
+      if (!presetKey || !presets[presetKey]) {
+        return;
+      }
+
+      const preset = presets[presetKey];
+      
+      // Populate form fields
+      if (preset.projectType) {
+        document.getElementById('projectType').value = preset.projectType;
+        // Trigger update to show/hide fields based on project type
+        updateExistingContextInputs();
+      }
+      if (preset.existingBuildingForm) document.getElementById('existingBuildingForm').value = preset.existingBuildingForm;
+      if (preset.existingDensity) document.getElementById('existingDensity').value = preset.existingDensity;
+      if (preset.buildingForm) document.getElementById('buildingForm').value = preset.buildingForm;
+      if (preset.storeys) document.getElementById('storeys').value = preset.storeys;
+      if (preset.numberOfPlots) document.getElementById('numberOfPlots').value = preset.numberOfPlots;
+      
+      // Handle floor area fields based on project type
+      if (preset.projectType === 'new_build' && preset.totalFloorAreaRange) {
+        document.getElementById('totalFloorAreaRange').value = preset.totalFloorAreaRange;
+      } else if (preset.projectType === 'extension' && preset.additionalFloorAreaRange) {
+        document.getElementById('additionalFloorAreaRange').value = preset.additionalFloorAreaRange;
+      } else if (preset.floorAreaRange) {
+        document.getElementById('floorAreaRange').value = preset.floorAreaRange;
+      }
+      
+      // Handle extension/renovation specific fields
+      if (preset.extensionType) document.getElementById('extensionType').value = preset.extensionType;
+      if (preset.renovationScope) document.getElementById('renovationScope').value = preset.renovationScope;
+      if (preset.footprintScale) document.getElementById('footprintScale').value = preset.footprintScale;
+      if (preset.bedrooms) document.getElementById('bedrooms').value = preset.bedrooms;
+      if (preset.bathrooms) document.getElementById('bathrooms').value = preset.bathrooms;
+      if (preset.kitchenType) document.getElementById('kitchenType').value = preset.kitchenType;
+      if (preset.livingSpaces) document.getElementById('livingSpaces').value = preset.livingSpaces;
+      if (preset.roofType) document.getElementById('roofType').value = preset.roofType;
+      if (preset.massingPreference) document.getElementById('massingPreference').value = preset.massingPreference;
+      if (preset.density) document.getElementById('density').value = preset.density;
+      if (preset.outputType) document.getElementById('outputType').value = preset.outputType;
+
+      // Trigger existing context visibility update
+      updateExistingContextInputs();
+      
+      // Show success message
+      showStatus(`Loaded preset: ${presetSelect.options[presetSelect.selectedIndex].text}`, 'success');
+      setTimeout(() => hideStatus(), 3000);
+    });
+
+    // Handle existing context inputs visibility/disabled state based on project type
+    const projectTypeSelect = document.getElementById('projectType');
+    const existingBuildingForm = document.getElementById('existingBuildingForm');
+    const existingOrientation = document.getElementById('existingOrientation');
+    const existingDensity = document.getElementById('existingDensity');
+
+    // Track which fields are auto-populated
+    let autoPopulatedFields = new Set();
+
+    function updateExistingContextInputs() {
+      const projectType = projectTypeSelect.value;
+      const isNewBuild = projectType === 'new_build';
+      const isRenovation = projectType === 'renovation';
+      const isExtension = projectType === 'extension';
+      
+      // Handle existing context fields visibility
+      const existingBuildingContent = document.getElementById('existing-building-content');
+      if (isNewBuild) {
+        // Hide existing building section for new builds
+        if (existingBuildingContent) {
+          existingBuildingContent.style.display = 'none';
+        }
+        existingBuildingForm.disabled = true;
+        existingOrientation.disabled = true;
+        existingDensity.disabled = true;
+        existingBuildingForm.value = '';
+        existingOrientation.value = '';
+        existingDensity.value = '';
+        document.getElementById('existingBuildingForm-estimated').style.display = 'none';
+        document.getElementById('existingOrientation-estimated').style.display = 'none';
+        document.getElementById('existingDensity-estimated').style.display = 'none';
+        autoPopulatedFields.clear();
+      } else {
+        // Show existing building section for extension, renovation, conversion
+        if (existingBuildingContent) {
+          existingBuildingContent.style.display = 'block';
+        }
+        existingBuildingForm.disabled = false;
+        existingOrientation.disabled = false;
+        existingDensity.disabled = false;
+      }
+      
+      // Handle renovation-specific fields
+      const renovationScopeGroup = document.getElementById('renovationScope-group');
+      const renovationScopeSelect = document.getElementById('renovationScope');
+      if (isRenovation) {
+        renovationScopeGroup.style.display = 'block';
+        renovationScopeSelect.required = true;
+      } else {
+        renovationScopeGroup.style.display = 'none';
+        renovationScopeSelect.required = false;
+        renovationScopeSelect.value = '';
+      }
+      
+      // Handle extension-specific fields
+      const extensionTypeGroup = document.getElementById('extensionType-group');
+      const additionalFloorAreaRangeGroup = document.getElementById('additionalFloorAreaRange-group');
+      const extensionTypeSelect = document.getElementById('extensionType');
+      const additionalFloorAreaRangeSelect = document.getElementById('additionalFloorAreaRange');
+      if (isExtension) {
+        extensionTypeGroup.style.display = 'block';
+        additionalFloorAreaRangeGroup.style.display = 'block';
+        extensionTypeSelect.required = true;
+        additionalFloorAreaRangeSelect.required = true;
+      } else {
+        extensionTypeGroup.style.display = 'none';
+        additionalFloorAreaRangeGroup.style.display = 'none';
+        extensionTypeSelect.required = false;
+        additionalFloorAreaRangeSelect.required = false;
+        extensionTypeSelect.value = '';
+        additionalFloorAreaRangeSelect.value = '';
+      }
+      
+      // Handle floor area range fields
+      const floorAreaRangeGroup = document.getElementById('floorAreaRange-group');
+      const totalFloorAreaRangeGroup = document.getElementById('totalFloorAreaRange-group');
+      const floorAreaRangeSelect = document.getElementById('floorAreaRange');
+      const totalFloorAreaRangeSelect = document.getElementById('totalFloorAreaRange');
+      
+      if (isNewBuild) {
+        // New Build: show totalFloorAreaRange, hide floorAreaRange
+        floorAreaRangeGroup.style.display = 'none';
+        totalFloorAreaRangeGroup.style.display = 'block';
+        floorAreaRangeSelect.required = false;
+        totalFloorAreaRangeSelect.required = true;
+        floorAreaRangeSelect.value = '';
+      } else if (isExtension) {
+        // Extension: show additionalFloorAreaRange (already handled above), hide others
+        floorAreaRangeGroup.style.display = 'none';
+        totalFloorAreaRangeGroup.style.display = 'none';
+        floorAreaRangeSelect.required = false;
+        totalFloorAreaRangeSelect.required = false;
+        floorAreaRangeSelect.value = '';
+        totalFloorAreaRangeSelect.value = '';
+      } else if (isRenovation) {
+        // Renovation: hide all floor area fields
+        floorAreaRangeGroup.style.display = 'none';
+        totalFloorAreaRangeGroup.style.display = 'none';
+        floorAreaRangeSelect.required = false;
+        totalFloorAreaRangeSelect.required = false;
+        floorAreaRangeSelect.value = '';
+        totalFloorAreaRangeSelect.value = '';
+      } else {
+        // Conversion: show floorAreaRange, hide totalFloorAreaRange
+        floorAreaRangeGroup.style.display = 'block';
+        totalFloorAreaRangeGroup.style.display = 'none';
+        floorAreaRangeSelect.required = true;
+        totalFloorAreaRangeSelect.required = false;
+        totalFloorAreaRangeSelect.value = '';
+      }
+    }
+
+    // Hide estimated label when user manually changes a field
+    existingBuildingForm.addEventListener('change', function() {
+      if (autoPopulatedFields.has('existingBuildingForm')) {
+        document.getElementById('existingBuildingForm-estimated').style.display = 'none';
+        autoPopulatedFields.delete('existingBuildingForm');
+      }
+    });
+
+    existingOrientation.addEventListener('change', function() {
+      if (autoPopulatedFields.has('existingOrientation')) {
+        document.getElementById('existingOrientation-estimated').style.display = 'none';
+        autoPopulatedFields.delete('existingOrientation');
+      }
+    });
+
+    existingDensity.addEventListener('change', function() {
+      if (autoPopulatedFields.has('existingDensity')) {
+        document.getElementById('existingDensity-estimated').style.display = 'none';
+        autoPopulatedFields.delete('existingDensity');
+      }
+    });
+
+    // Listen for project type changes
+    projectTypeSelect.addEventListener('change', updateExistingContextInputs);
+    
+    // Initialize on page load
+    updateExistingContextInputs();
+
+    // Handle address lookup
+    lookupBtn.addEventListener('click', async () => {
+      const address = addressInput.value.trim();
+      if (!address) {
+        showStatus('Please enter an address or postcode', 'error');
+        return;
+      }
+
+      lookupBtn.disabled = true;
+      showStatus('Looking up address...', 'info');
+      locationDisplay.style.display = 'none';
+      siteContextSummary = null;
+      geocodeResult = null;
+
+      try {
+        // Step 1: Geocode the address
+        const geocodeResponse = await fetch(`${API_URL}/api/geocode`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ query: address }),
+        });
+
+        // Check if response is OK and has JSON content type
+        const contentType = geocodeResponse.headers.get('content-type');
+        const isJson = contentType && contentType.includes('application/json');
+        
+        if (!geocodeResponse.ok) {
+          // Try to parse JSON error, fallback to text
+          let errorMessage = 'Geocoding failed';
+          try {
+            if (isJson) {
+              const error = await geocodeResponse.json();
+              errorMessage = error.error || error.message || errorMessage;
+            } else {
+              const text = await geocodeResponse.text();
+              errorMessage = text || errorMessage;
+            }
+          } catch (parseError) {
+            console.error('Failed to parse error response:', parseError);
+            errorMessage = `Server error: ${geocodeResponse.status} ${geocodeResponse.statusText}`;
+          }
+          throw new Error(errorMessage);
+        }
+
+        // Ensure we have JSON before parsing
+        if (!isJson) {
+          const text = await geocodeResponse.text();
+          throw new Error(`Server returned non-JSON response: ${text.substring(0, 100)}`);
+        }
+
+        const result = await geocodeResponse.json();
+        geocodeResult = result; // Store for potential rebuild on form submit
+        
+        // Display location name
+        locationName.textContent = result.displayName;
+        locationDisplay.style.display = 'block';
+
+        // Step 1.5: Query nearby buildings and infer existing context (for non-new-build projects)
+        const lookupProjectType = document.getElementById('projectType').value;
+        const lookupIsNewBuild = lookupProjectType === 'new_build';
+
+        if (!lookupIsNewBuild) {
+          try {
+            // Get density hint if available
+            const densityHint = document.getElementById('density').value || undefined;
+
+            const inferResponse = await fetch(`${API_URL}/api/infer-existing-context`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                lat: result.lat,
+                lng: result.lng,
+                densityHint: densityHint || undefined,
+              }),
+            });
+
+            if (inferResponse.ok) {
+              const inferData = await inferResponse.json();
+              const inferredContext = inferData.inferredContext;
+
+              // Auto-populate existing context fields if they're empty
+              if (inferredContext) {
+                const existingBuildingFormSelect = document.getElementById('existingBuildingForm');
+                if (existingBuildingFormSelect && !existingBuildingFormSelect.value) {
+                  existingBuildingFormSelect.value = inferredContext.existingBuildingType;
+                  document.getElementById('existingBuildingForm-estimated').style.display = 'block';
+                  autoPopulatedFields.add('existingBuildingForm');
+                }
+
+                // Auto-populate density if available and empty
+                const existingDensitySelect = document.getElementById('existingDensity');
+                if (densityHint && existingDensitySelect && !existingDensitySelect.value) {
+                  existingDensitySelect.value = densityHint;
+                  document.getElementById('existingDensity-estimated').style.display = 'block';
+                  autoPopulatedFields.add('existingDensity');
+                }
+              }
+            }
+          } catch (inferError) {
+            // Silently fail - inference is optional
+            console.warn('Failed to infer existing context:', inferError);
+          }
+        }
+
+        // Step 2: Build site context summary
+        // Collect current form values to build concept brief
+        const currentProjectType = document.getElementById('projectType').value;
+        const currentIsNewBuild = currentProjectType === 'new_build';
+
+        const proposedDesign = {
+          projectType: currentProjectType,
+          buildingForm: document.getElementById('buildingForm').value,
+          storeys: document.getElementById('storeys').value,
+          numberOfPlots: document.getElementById('numberOfPlots').value,
+          floorAreaRange: document.getElementById('floorAreaRange').value,
+          bedrooms: document.getElementById('bedrooms').value,
+          bathrooms: document.getElementById('bathrooms').value,
+          kitchenType: document.getElementById('kitchenType').value,
+          livingSpaces: document.getElementById('livingSpaces').value,
+          roofType: document.getElementById('roofType').value,
+          massingPreference: document.getElementById('massingPreference').value,
+          outputType: document.getElementById('outputType').value,
+        };
+
+        const footprintScale = document.getElementById('footprintScale').value;
+        if (footprintScale) {
+          proposedDesign.footprintScale = footprintScale;
+        }
+
+        const orientation = document.getElementById('orientation').value;
+        if (orientation) {
+          proposedDesign.orientation = orientation;
+        }
+
+        const density = document.getElementById('density').value;
+        if (density) {
+          proposedDesign.density = density;
+        }
+
+        let existingContext = undefined;
+        if (!currentIsNewBuild) {
+          const existingBuildingForm = document.getElementById('existingBuildingForm').value;
+          const existingOrientation = document.getElementById('existingOrientation').value;
+          const existingDensity = document.getElementById('existingDensity').value;
+
+          if (existingBuildingForm || existingOrientation || existingDensity) {
+            existingContext = {};
+            if (existingBuildingForm) {
+              existingContext.buildingForm = existingBuildingForm;
+            }
+            if (existingOrientation) {
+              existingContext.orientation = existingOrientation;
+            }
+            if (existingDensity) {
+              existingContext.density = existingDensity;
+            }
+          }
+        }
+
+        const conceptBrief = {
+          proposedDesign: proposedDesign,
+        };
+        if (existingContext) {
+          conceptBrief.existingContext = existingContext;
+        }
+
+        // Check if we have minimum required fields for building site context
+        const hasRequiredFields = proposedDesign.projectType && 
+                                  proposedDesign.buildingForm && 
+                                  proposedDesign.outputType;
+
+        if (hasRequiredFields) {
+          const contextResponse = await fetch(`${API_URL}/api/build-site-context`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              lat: result.lat,
+              lng: result.lng,
+              displayName: result.displayName,
+              conceptInputs: conceptBrief, // Server accepts both formats
+            }),
+          });
+
+          if (!contextResponse.ok) {
+            const error = await contextResponse.json();
+            throw new Error(error.error || 'Failed to build site context');
+          }
+
+          const contextResult = await contextResponse.json();
+          siteContextSummary = contextResult.siteContextSummary;
+          showStatus('Site context loaded successfully!', 'success');
+        } else {
+          // Still store the location even if we can't build full context yet
+          // It will be built on form submit if required fields are filled
+          showStatus('Location found. Fill in project details to generate site context.', 'info');
+        }
+        } catch (error) {
+        console.error('Lookup error:', error);
+        showStatus(`Error: ${error.message}`, 'error');
+        locationDisplay.style.display = 'none';
+        geocodeResult = null;
+      } finally {
+        lookupBtn.disabled = false;
+      }
+    });
+
+    // Toggle prompt visibility
+    promptHeader.addEventListener('click', () => {
+      const isExpanded = promptContent.classList.contains('show');
+      if (isExpanded) {
+        promptContent.classList.remove('show');
+        promptToggle.classList.remove('expanded');
+      } else {
+        promptContent.classList.add('show');
+        promptToggle.classList.add('expanded');
+      }
+    });
+
+    // Helper function to convert file to base64
+    function fileToBase64(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          // Remove data URL prefix (e.g., "data:image/png;base64,")
+          const base64 = reader.result.split(',')[1];
+          resolve(base64);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function showStatus(message, type = 'info') {
+      status.textContent = message;
+      status.className = `status ${type}`;
+    }
+
+    function hideStatus() {
+      status.className = 'status';
+    }
+
+    function showResult(data) {
+      // Hide prompt section (not available in new API)
+      promptContent.classList.remove('show');
+      promptToggle.classList.remove('expanded');
+
+      // Display rendered image
+      resultImage.src = data.imageUrl;
+      resultPromptVersion.textContent = data.promptVersion;
+      
+      // Format renderType for display
+      let renderTypeDisplay = 'N/A';
+      if (data.renderType) {
+        renderTypeDisplay = data.renderType.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+      }
+      resultRenderType.textContent = renderTypeDisplay;
+
+      // Show concept ID
+      if (data.conceptId) {
+        resultConceptIdValue.textContent = data.conceptId;
+        resultConceptId.style.display = 'block';
+
+        // If axonometric output, enable plan/section generation
+        if (data.renderType === 'axonometric') {
+          renderConceptActions.style.display = 'block';
+          renderGeneratePlanBtn.disabled = false;
+          renderGenerateSectionBtn.disabled = false;
+          // Clear previous plan/section results
+          renderPlanResult.innerHTML = '';
+          renderSectionResult.innerHTML = '';
+        } else {
+          // For plan/section outputs, hide the actions
+          renderConceptActions.style.display = 'none';
+        }
+      } else {
+        // No concept ID - hide concept-related UI
+        resultConceptId.style.display = 'none';
+        renderConceptActions.style.display = 'none';
+      }
+
+      resultContainer.classList.add('show');
+    }
+
+    function hideResult() {
+      resultContainer.classList.remove('show');
+      // Don't clear concept state - allow plan/section generation even after hiding result
+      // But clear plan/section results
+      if (renderPlanResult) renderPlanResult.innerHTML = '';
+      if (renderSectionResult) renderSectionResult.innerHTML = '';
+    }
+
+    function showConceptStatus(message, type = 'info') {
+      conceptStatus.textContent = message;
+      conceptStatus.className = `status ${type}`;
+    }
+
+    function hideConceptStatus() {
+      conceptStatus.className = 'status';
+    }
+
+    // Helper function to call /api/render for additional views
+    async function callApiRender(renderType, projectId, conceptId, conceptBrief) {
+      const payload = {
+        projectId: projectId,
+        renderType: renderType,
+        conceptInputs: conceptBrief,
+        conceptId: conceptId,
+      };
+
+      const response = await fetch(`${API_URL}/api/render`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const contentType = response.headers.get('content-type');
+        let errorData = null;
+        if (contentType && contentType.includes('application/json')) {
+          errorData = await response.json();
+        }
+        throw { status: response.status, data: errorData };
+      }
+
+      return await response.json();
+    }
+
+    // Generate Plan from current concept
+    renderGeneratePlanBtn.addEventListener('click', async () => {
+      if (!currentConceptId || !currentProjectId) {
+        showStatus('Please generate an axonometric view first', 'error');
+        return;
+      }
+
+      // Get the concept brief from the form
+      const submitProjectType = document.getElementById('projectType').value;
+      const submitIsNewBuild = submitProjectType === 'new_build';
+
+      const proposedDesign = {
+        projectType: submitProjectType,
+        buildingForm: document.getElementById('buildingForm').value,
+        storeys: document.getElementById('storeys').value,
+        numberOfPlots: document.getElementById('numberOfPlots').value,
+        bedrooms: document.getElementById('bedrooms').value,
+        bathrooms: document.getElementById('bathrooms').value,
+        kitchenType: document.getElementById('kitchenType').value,
+        livingSpaces: document.getElementById('livingSpaces').value,
+        roofType: document.getElementById('roofType').value,
+        massingPreference: document.getElementById('massingPreference').value,
+        outputType: 'concept_plan',
+      };
+
+      // Add project type-specific fields
+      if (submitProjectType === 'new_build') {
+        proposedDesign.totalFloorAreaRange = document.getElementById('totalFloorAreaRange').value;
+      } else if (submitProjectType === 'extension') {
+        proposedDesign.extensionType = document.getElementById('extensionType').value;
+        proposedDesign.additionalFloorAreaRange = document.getElementById('additionalFloorAreaRange').value;
+      } else if (submitProjectType === 'renovation') {
+        proposedDesign.renovationScope = document.getElementById('renovationScope').value;
+      } else if (submitProjectType === 'conversion') {
+        proposedDesign.floorAreaRange = document.getElementById('floorAreaRange').value;
+      }
+
+      const conceptBrief = { proposedDesign };
+
+      if (!submitIsNewBuild) {
+        const existingBuildingForm = document.getElementById('existingBuildingForm').value;
+        if (existingBuildingForm) {
+          conceptBrief.existingContext = { buildingForm: existingBuildingForm };
+        }
+      }
+
+      renderGeneratePlanBtn.disabled = true;
+      renderPlanResult.innerHTML = '<p style="color: #666;">Generating plan...</p>';
+
+      try {
+        const data = await callApiRender('floor_plan', currentProjectId, currentConceptId, conceptBrief);
+
+        renderPlanResult.innerHTML = `
+          <h4 style="margin-bottom: 10px;">Plan View</h4>
+          <img src="${data.imageUrl}" alt="Plan view" style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px;">
+          <p style="margin: 5px 0 0 0; font-size: 12px; color: #666;">v${data.promptVersion}</p>
+        `;
+
+        showStatus('Plan generated successfully!', 'success');
+      } catch (error) {
+        console.error('Error generating plan:', error);
+        
+        if (error.status === 409 && error.data?.error === 'AXON_REQUIRED') {
+          renderPlanResult.innerHTML = `
+            <div style="padding: 15px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 4px;">
+              <p style="margin: 0; color: #856404; font-weight: 600;">⚠️ Axon Required</p>
+              <p style="margin: 8px 0 0 0; font-size: 13px; color: #856404;">${error.data.message}</p>
+            </div>
+          `;
+        } else {
+          renderPlanResult.innerHTML = `<p style="color: #f44336;">Error: ${error.data?.message || error.message || 'Failed to generate plan'}</p>`;
+        }
+      } finally {
+        renderGeneratePlanBtn.disabled = false;
+      }
+    });
+
+    // Generate Section from current concept
+    renderGenerateSectionBtn.addEventListener('click', async () => {
+      if (!currentConceptId || !currentProjectId) {
+        showStatus('Please generate an axonometric view first', 'error');
+        return;
+      }
+
+      // Get the concept brief from the form
+      const submitProjectType = document.getElementById('projectType').value;
+      const submitIsNewBuild = submitProjectType === 'new_build';
+
+      const proposedDesign = {
+        projectType: submitProjectType,
+        buildingForm: document.getElementById('buildingForm').value,
+        storeys: document.getElementById('storeys').value,
+        numberOfPlots: document.getElementById('numberOfPlots').value,
+        bedrooms: document.getElementById('bedrooms').value,
+        bathrooms: document.getElementById('bathrooms').value,
+        kitchenType: document.getElementById('kitchenType').value,
+        livingSpaces: document.getElementById('livingSpaces').value,
+        roofType: document.getElementById('roofType').value,
+        massingPreference: document.getElementById('massingPreference').value,
+        outputType: 'concept_section',
+      };
+
+      // Add project type-specific fields
+      if (submitProjectType === 'new_build') {
+        proposedDesign.totalFloorAreaRange = document.getElementById('totalFloorAreaRange').value;
+      } else if (submitProjectType === 'extension') {
+        proposedDesign.extensionType = document.getElementById('extensionType').value;
+        proposedDesign.additionalFloorAreaRange = document.getElementById('additionalFloorAreaRange').value;
+      } else if (submitProjectType === 'renovation') {
+        proposedDesign.renovationScope = document.getElementById('renovationScope').value;
+      } else if (submitProjectType === 'conversion') {
+        proposedDesign.floorAreaRange = document.getElementById('floorAreaRange').value;
+      }
+
+      const conceptBrief = { proposedDesign };
+
+      if (!submitIsNewBuild) {
+        const existingBuildingForm = document.getElementById('existingBuildingForm').value;
+        if (existingBuildingForm) {
+          conceptBrief.existingContext = { buildingForm: existingBuildingForm };
+        }
+      }
+
+      renderGenerateSectionBtn.disabled = true;
+      renderSectionResult.innerHTML = '<p style="color: #666;">Generating section...</p>';
+
+      try {
+        const data = await callApiRender('section', currentProjectId, currentConceptId, conceptBrief);
+
+        renderSectionResult.innerHTML = `
+          <h4 style="margin-bottom: 10px;">Section View</h4>
+          <img src="${data.imageUrl}" alt="Section view" style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px;">
+          <p style="margin: 5px 0 0 0; font-size: 12px; color: #666;">v${data.promptVersion}</p>
+        `;
+
+        showStatus('Section generated successfully!', 'success');
+      } catch (error) {
+        console.error('Error generating section:', error);
+        
+        if (error.status === 409 && error.data?.error === 'AXON_REQUIRED') {
+          renderSectionResult.innerHTML = `
+            <div style="padding: 15px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 4px;">
+              <p style="margin: 0; color: #856404; font-weight: 600;">⚠️ Axon Required</p>
+              <p style="margin: 8px 0 0 0; font-size: 13px; color: #856404;">${error.data.message}</p>
+            </div>
+          `;
+        } else {
+          renderSectionResult.innerHTML = `<p style="color: #f44336;">Error: ${error.data?.message || error.message || 'Failed to generate section'}</p>`;
+        }
+      } finally {
+        renderGenerateSectionBtn.disabled = false;
+      }
+    });
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      hideStatus();
+      hideResult();
+
+      const projectId = document.getElementById('projectId').value;
+
+      if (!projectId) {
+        showStatus('Please fill in all required fields', 'error');
+        return;
+      }
+
+      // Collect all structured inputs as ConceptBrief
+      const submitProjectType = document.getElementById('projectType').value;
+      const submitIsNewBuild = submitProjectType === 'new_build';
+
+      // Build proposedDesign based on projectType
+      const proposedDesign = {
+        projectType: submitProjectType,
+        buildingForm: document.getElementById('buildingForm').value,
+        storeys: document.getElementById('storeys').value,
+        numberOfPlots: document.getElementById('numberOfPlots').value,
+        bedrooms: document.getElementById('bedrooms').value,
+        bathrooms: document.getElementById('bathrooms').value,
+        kitchenType: document.getElementById('kitchenType').value,
+        livingSpaces: document.getElementById('livingSpaces').value,
+        roofType: document.getElementById('roofType').value,
+        massingPreference: document.getElementById('massingPreference').value,
+        outputType: document.getElementById('outputType').value,
+      };
+
+      // Add projectType-specific fields
+      if (submitProjectType === 'new_build') {
+        proposedDesign.totalFloorAreaRange = document.getElementById('totalFloorAreaRange').value;
+      } else if (submitProjectType === 'extension') {
+        proposedDesign.extensionType = document.getElementById('extensionType').value;
+        proposedDesign.additionalFloorAreaRange = document.getElementById('additionalFloorAreaRange').value;
+      } else if (submitProjectType === 'renovation') {
+        proposedDesign.renovationScope = document.getElementById('renovationScope').value;
+        // Renovation doesn't use floor area fields
+      } else if (submitProjectType === 'conversion') {
+        proposedDesign.floorAreaRange = document.getElementById('floorAreaRange').value;
+      }
+
+      // Add optional fields to proposedDesign
+      if (submitProjectType !== 'renovation') {
+        // Footprint scale not applicable for renovation
+        const footprintScale = document.getElementById('footprintScale').value;
+        if (footprintScale) {
+          proposedDesign.footprintScale = footprintScale;
+        }
+      }
+
+      const orientation = document.getElementById('orientation').value;
+      if (orientation) {
+        proposedDesign.orientation = orientation;
+      }
+
+      const density = document.getElementById('density').value;
+      if (density) {
+        proposedDesign.density = density;
+      }
+
+      // Build existingContext (only if not new build)
+      let existingContext = undefined;
+      if (!submitIsNewBuild) {
+        const existingBuildingForm = document.getElementById('existingBuildingForm').value;
+        const existingOrientation = document.getElementById('existingOrientation').value;
+        const existingDensity = document.getElementById('existingDensity').value;
+
+        // For non-new-build projects, existingContext.buildingForm is required
+        if (!existingBuildingForm) {
+          showStatus('Please provide existing building form for extension, renovation, or conversion projects', 'error');
+          submitBtn.disabled = false;
+          return;
+        }
+
+        existingContext = {
+          buildingForm: existingBuildingForm,
+        };
+        
+        if (existingOrientation) {
+          existingContext.orientation = existingOrientation;
+        }
+        if (existingDensity) {
+          existingContext.density = existingDensity;
+        }
+      }
+
+      // Build ConceptBrief
+      const conceptBrief = {
+        proposedDesign: proposedDesign,
+      };
+      if (existingContext) {
+        conceptBrief.existingContext = existingContext;
+      }
+
+      // Build site context summary if we have geocode result but no summary yet
+      if (geocodeResult && !siteContextSummary) {
+        const hasRequiredFields = conceptBrief.proposedDesign.projectType && 
+                                conceptBrief.proposedDesign.buildingForm && 
+                                conceptBrief.proposedDesign.outputType;
+          
+          if (hasRequiredFields) {
+            try {
+              showStatus('Building site context...', 'info');
+              const contextResponse = await fetch(`${API_URL}/api/build-site-context`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  lat: geocodeResult.lat,
+                  lng: geocodeResult.lng,
+                  displayName: geocodeResult.displayName,
+                  conceptInputs: conceptBrief, // Server accepts both formats
+                }),
+              });
+
+            if (contextResponse.ok) {
+              const contextResult = await contextResponse.json();
+              siteContextSummary = contextResult.siteContextSummary;
+            }
+          } catch (error) {
+            console.warn('Failed to build site context on submit:', error);
+            // Continue without site context if build fails
+          }
+        }
+      }
+
+      // Log conceptBrief to console
+      console.log('Concept Brief:', conceptBrief);
+
+      submitBtn.disabled = true;
+      showStatus('Generating rendering...', 'info');
+
+      try {
+        // Map outputType to renderType
+        const outputType = conceptBrief.proposedDesign.outputType;
+        const renderTypeMap = {
+          'concept_axonometric': 'axonometric',
+          'concept_plan': 'floor_plan',
+          'concept_section': 'section',
+        };
+        const renderType = renderTypeMap[outputType] || 'axonometric';
+
+        const payload = {
+          projectId: projectId,
+          renderType: renderType,
+          conceptInputs: conceptBrief,
+        };
+
+        // Add concept ID if available (for correlated plan/section views)
+        if (currentConceptId && currentProjectId === projectId) {
+          payload.conceptId = currentConceptId;
+        }
+
+        // Add site context summary if available
+        if (siteContextSummary) {
+          payload.siteContextSummary = siteContextSummary;
+        }
+
+        // Log payload before sending
+        console.log('Request Payload:', payload);
+
+        const response = await fetch(`${API_URL}/api/render`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+        });
+
+        if (!response.ok) {
+          let errorMessage = `HTTP error! status: ${response.status}`;
+          try {
+            const error = await response.json();
+            errorMessage = error.message || error.error || errorMessage;
+            if (error.stack && process.env.NODE_ENV === 'development') {
+              console.error('Server error stack:', error.stack);
+            }
+          } catch (e) {
+            // If response is not JSON, use status text
+            errorMessage = response.statusText || errorMessage;
+          }
+          throw new Error(errorMessage);
+        }
+
+        const data = await response.json();
+        
+        // Update concept ID for this project
+        if (data.conceptId) {
+          currentConceptId = data.conceptId;
+          currentProjectId = projectId;
+        }
+        
+        showResult(data);
+        showStatus('Rendering generated successfully!', 'success');
+      } catch (error) {
+        console.error('Error:', error);
+        showStatus(`Error: ${error.message}`, 'error');
+      } finally {
+        submitBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
+
+

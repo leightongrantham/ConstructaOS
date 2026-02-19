@@ -1,5 +1,6 @@
 node_modules/
 dist/
+<<<<<<< HEAD
 .env
 .env.local
 .env.*.local
@@ -7,3 +8,13 @@ dist/
 .concepts/
 *.log
 .DS_Store
+=======
+*.log
+.DS_Store
+.env
+.env.local
+*.tsbuildinfo
+.vercel
+.env*.local
+.concepts/
+>>>>>>> origin/main
