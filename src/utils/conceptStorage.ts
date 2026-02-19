@@ -133,6 +133,7 @@ export async function getConceptSeed(
   projectId: string,
   conceptId: string
 ): Promise<StoredConcept | null> {
+  const storagePath = `projects/${projectId}/concepts/${conceptId}/seed.json`;
   const supabaseUrl = process.env.SUPABASE_URL;
   const supabaseKey = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
   const supabaseBucket = process.env.SUPABASE_STORAGE_BUCKET || 'concepts';
@@ -140,7 +141,6 @@ export async function getConceptSeed(
   if (!supabaseUrl || !supabaseKey) {
     // Fallback to local file system storage
     try {
-      // Use storagePath for consistent path structure
       const localFilePath = join(LOCAL_STORAGE_DIR, storagePath);
       const fileContent = await readFile(localFilePath, 'utf-8');
       const data = JSON.parse(fileContent) as unknown;
@@ -171,7 +171,6 @@ export async function getConceptSeed(
     }
   }
 
-  const storagePath = `projects/${projectId}/concepts/${conceptId}/seed.json`;
   const downloadUrl = `${supabaseUrl}/storage/v1/object/public/${supabaseBucket}/${storagePath}`;
 
   try {
