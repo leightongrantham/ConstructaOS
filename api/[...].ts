@@ -53,7 +53,7 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
     if (originalUrl.startsWith('/api')) {
       // Split path and query string
       const [pathname, queryString] = originalUrl.split('?');
-      strippedUrl = pathname.slice(4) || '/';
+      strippedUrl = (pathname ?? '').slice(4) || '/';
       // Preserve query string if present
       if (queryString) {
         strippedUrl += `?${queryString}`;
