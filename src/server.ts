@@ -884,7 +884,7 @@ export function createServer(): express.Application {
 }
 
 /**
- * Start the server
+ * Start the server (for local dev)
  */
 export function startServer(): void {
   const app = createServer();
@@ -894,4 +894,7 @@ export function startServer(): void {
     console.log(`Server running on port ${port}`);
   });
 }
+
+/** Default export for Vercel server entry (src/server) */
+export default createServer();
 
