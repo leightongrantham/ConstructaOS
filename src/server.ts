@@ -68,6 +68,11 @@ export function createServer(): express.Application {
         callback(null, true);
         return;
       }
+      // Allow Lovable preview and deployed apps
+      if (origin.includes('lovableproject.com') || origin.includes('lovable.app') || origin.includes('lovable.dev')) {
+        callback(null, true);
+        return;
+      }
       // Reject other origins
       callback(new Error('Not allowed by CORS'));
     },
