@@ -8,6 +8,25 @@
 
 import 'dotenv/config';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+
+const ALLOWED_ORIGINS = [
+  /^https?:\/\/localhost(:\d+)?$/,
+  /^https?:\/\/127\.0\.0\.1(:\d+)?$/,
+  /\.vercel\.app$/,
+  /lovableproject\.com$/,
+  /lovable\.app$/,
+  /lovable\.dev$/,
+];
+
+function setCorsHeaders(req: VercelRequest, res: VercelResponse): void {
+  const origin = req.headers.origin;
+  if (origin && ALLOWED_ORIGINS.some((re) => re.test(origin))) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+}
 import { geocodeAddress } from '../src/services/site/geocodeAddress.js';
 import { queryNearbyBuildingsOverpass } from '../src/services/site/queryNearbyBuildingsOverpass.js';
 import { selectPrimaryBuilding } from '../src/services/site/selectPrimaryBuilding.js';
@@ -107,7 +126,13 @@ export default async function handler(
   req: VercelRequest,
   res: VercelResponse
 ): Promise<void> {
-  // Only allow POST
+  setCorsHeaders(req, res);
+
+  if (req.method === 'OPTIONS') {
+    res.status(204).end();
+    return;
+  }
+
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed. Use POST.' });
     return;
