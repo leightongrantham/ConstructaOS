@@ -742,7 +742,17 @@ export function createServer(): express.Application {
       const requestStartTime = Date.now();
       const VERCEL_FREE_TIMEOUT = 10000; // 10 seconds for free tier
       const TIMEOUT_WARNING_THRESHOLD = 8000; // Warn if approaching timeout
-      
+
+      // Early check: OPENAI_API_KEY required for image generation
+      if (!process.env.OPENAI_API_KEY?.trim()) {
+        res.status(503).json({
+          error: 'SERVICE_UNAVAILABLE',
+          message: 'OPENAI_API_KEY is not configured. Add it in Vercel: Project Settings → Environment Variables → Production.',
+          hint: 'Image generation requires a valid OpenAI API key. Set OPENAI_API_KEY for the Production environment.',
+        });
+        return;
+      }
+
       try {
         const { projectId: rawProjectId, renderType, conceptId, conceptInputs, includePeopleInPlan, includePeopleInSection } = req.body;
 
@@ -951,6 +961,15 @@ export function createServer(): express.Application {
               error: 'REFERENCE_IMAGE_FETCH_FAILED',
               message: 'Failed to fetch reference axonometric image for correlation.',
               details: error.message,
+            });
+            return;
+          }
+          // Handle connection errors with actionable hint
+          if (error instanceof Error && (error.message.includes('Connection') || error.message.includes('ECONNREFUSED') || error.message.includes('fetch failed'))) {
+            res.status(503).json({
+              error: 'OPENAI_CONNECTION_FAILED',
+              message: error.message,
+              hint: 'Vercel serverless may have connectivity issues to OpenAI. Ensure OPENAI_API_KEY is set. Consider AI_GATEWAY_API_KEY for chat, or deploy to Railway/Render for image generation.',
             });
             return;
           }

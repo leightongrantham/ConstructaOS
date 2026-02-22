@@ -2067,8 +2067,12 @@
             errorMessage = error.message || error.error || errorMessage;
             errorDetails = error;
             
-            // Special handling for timeout errors
-            if (response.status === 503 && error.error === 'TIMEOUT_IMMINENT') {
+            // Special handling for timeout and config errors
+            if (response.status === 503 && error.error === 'SERVICE_UNAVAILABLE') {
+              errorMessage = `Configuration required: ${error.message} Add OPENAI_API_KEY in Vercel → Settings → Environment Variables.`;
+            } else if (response.status === 503 && error.error === 'OPENAI_CONNECTION_FAILED') {
+              errorMessage = `Connection error: ${error.message} Ensure OPENAI_API_KEY is set. Vercel serverless may have connectivity issues—consider Railway for image generation.`;
+            } else if (response.status === 503 && error.error === 'TIMEOUT_IMMINENT') {
               errorMessage = `⏱️ Timeout Warning\n\n${error.message}\n\n💡 ${error.suggestion}`;
             } else if (response.status === 504) {
               errorMessage = `⏱️ Gateway Timeout (504)\n\nThe AI rendering took too long (>10s free tier limit).\n\n💡 Solutions:\n• Upgrade to Vercel Pro (60s timeout)\n• Run locally for development\n• See DEPLOYMENT.md for details`;
