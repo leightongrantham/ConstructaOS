@@ -1548,6 +1548,26 @@
       }
     }
 
+    function showErrorInResult(message) {
+      resultContainer.classList.add('show');
+      resultImage.style.display = 'none';
+      let el = document.getElementById('result-error-message');
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'result-error-message';
+        el.style.cssText = 'padding: 20px; background: #ffebee; border-left: 4px solid #f44336; color: #c62828; border-radius: 4px; margin: 15px 0; white-space: pre-wrap;';
+        resultContainer.insertBefore(el, resultImage);
+      }
+      el.style.display = 'block';
+      el.innerHTML = String(message).replace(/\n/g, '<br>');
+    }
+
+    function clearErrorInResult() {
+      const el = document.getElementById('result-error-message');
+      if (el) el.style.display = 'none';
+      resultImage.style.display = '';
+    }
+
     function hideStatus() {
       status.className = 'status';
       status.textContent = '';
@@ -1556,11 +1576,13 @@
     }
 
     function showResult(data) {
+      clearErrorInResult();
       // Hide prompt section (not available in new API)
       promptContent.classList.remove('show');
       promptToggle.classList.remove('expanded');
 
       // Display rendered image
+      resultImage.style.display = '';
       resultImage.src = data.imageDataUrl || data.imageUrl;
       resultPromptVersion.textContent = data.promptVersion;
       
@@ -2085,9 +2107,11 @@
               console.error('Full error details:', errorDetails);
             }
           } catch (e) {
-            // If response is not JSON, use status text
+            // If response is not JSON (e.g. Vercel 500 HTML page), use status + hint
             if (response.status === 504) {
               errorMessage = `⏱️ Gateway Timeout (504)\n\nThe server didn't respond in time. This happens on Vercel Free tier.\n\n💡 Upgrade to Pro or run locally.`;
+            } else if (response.status === 500) {
+              errorMessage = `Server error (500)\n\nThe render failed. Common causes:\n• OPENAI_API_KEY not set in Vercel → Settings → Environment Variables\n• Connection error to OpenAI (try Railway for more reliable hosting)\n• Function timeout (upgrade to Vercel Pro for 60s limit)`;
             } else {
               errorMessage = response.statusText || errorMessage;
             }
@@ -2109,6 +2133,7 @@
       } catch (error) {
         console.error('Error:', error);
         showStatus(`Error: ${error.message}`, 'error');
+        showErrorInResult(`Error: ${error.message}`);
       } finally {
         submitBtn.disabled = false;
       }
