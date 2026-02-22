@@ -160,15 +160,32 @@ async function generateImageWithOpenAI(
   console.log('[RENDER] OpenAI images.generate START', { model: 'gpt-image-1', numSamples, hasRef: !!referenceImageUrl });
   const imgStart = Date.now();
   let response;
-  try {
-    response = await imageClient.images.generate(requestParams);
-    console.log('[RENDER] OpenAI images.generate OK', { duration: Date.now() - imgStart, count: response.data?.length ?? 0 });
-  } catch (err) {
-    console.error('[RENDER] OpenAI images.generate FAIL', { duration: Date.now() - imgStart, error: err instanceof Error ? err.message : String(err), cause: err instanceof Error ? String(err.cause) : undefined });
-    throw err;
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      response = await imageClient.images.generate(requestParams);
+      console.log('[RENDER] OpenAI images.generate OK', { duration: Date.now() - imgStart, count: response.data?.length ?? 0 });
+      break;
+    } catch (err) {
+      const isConnectionError =
+        err instanceof Error &&
+        (err.message.includes('Connection') ||
+          err.message.includes('ECONNREFUSED') ||
+          err.message.includes('ENOTFOUND') ||
+          err.message.includes('fetch failed') ||
+          err.message.includes('ETIMEDOUT'));
+      if (isConnectionError && attempt < maxAttempts) {
+        const delay = attempt * 2000;
+        console.warn(`[RENDER] Connection error (attempt ${attempt}/${maxAttempts}), retrying in ${delay}ms...`);
+        await new Promise((r) => setTimeout(r, delay));
+      } else {
+        console.error('[RENDER] OpenAI images.generate FAIL', { duration: Date.now() - imgStart, error: err instanceof Error ? err.message : String(err), cause: err instanceof Error ? String(err.cause) : undefined });
+        throw err;
+      }
+    }
   }
 
-  if (!response.data || response.data.length === 0) {
+  if (!response || !response.data || response.data.length === 0) {
     throw new Error('Failed to generate image: No image data in response');
   }
 
