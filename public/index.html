@@ -2209,8 +2209,17 @@
         });
 
         if (!createResponse.ok) {
-          const error = await createResponse.json();
-          throw new Error(error.message || 'Failed to create job');
+          const ct = createResponse.headers.get('content-type') || '';
+          let errorMsg = 'Failed to create job';
+          if (ct.includes('application/json')) {
+            try {
+              const error = await createResponse.json();
+              errorMsg = error.message || error.error || errorMsg;
+            } catch (_) {}
+          } else if (createResponse.status === 404) {
+            errorMsg = 'Jobs API not found (404). Ensure /api/jobs/render is deployed.';
+          }
+          throw new Error(errorMsg);
         }
 
         const jobData = await createResponse.json();
@@ -2244,10 +2253,22 @@
             const statusResponse = await fetch(`${API_URL}/api/jobs/${jobId}?projectId=${projectId}`);
             
             if (!statusResponse.ok) {
-              throw new Error('Failed to check job status');
+              const ct = statusResponse.headers.get('content-type') || '';
+              if (!ct.includes('application/json')) {
+                throw new Error(statusResponse.status === 404 ? 'Jobs API not found (404)' : 'Failed to check job status');
+              }
+              const errData = await statusResponse.json();
+              throw new Error(errData.error || errData.message || 'Failed to check job status');
             }
 
-            const { job } = await statusResponse.json();
+            let data;
+            try {
+              data = await statusResponse.json();
+            } catch (_) {
+              throw new Error('Server returned invalid response (not JSON). The jobs API may not be deployed.');
+            }
+            const job = data?.job;
+            if (!job) throw new Error('No job in response');
 
             // Update status message
             const progressText = job.progress ? ` (${job.progress}%)` : '';
