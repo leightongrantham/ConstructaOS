@@ -48,7 +48,7 @@ function MyApp() {
 | Prop | Type | Required | Description |
 |------|------|----------|-------------|
 | `apiBaseUrl` | `string` | Yes | Base URL of the ai-render-service (e.g. `https://ai-render-service-weld.vercel.app`) |
-| `onLookupComplete` | `(result: SiteLookupResult) => void` | Yes | Called when user confirms the footprint with the final result |
+| `onLookupComplete` | `(result: SiteLookupResult) => void` | Yes | Called when user clicks "Use this site". **Only update site state**; do not trigger a render from this callback. |
 | `placeholder` | `string` | No | Placeholder for address input (default: "Enter address or postcode") |
 | `lookupButtonLabel` | `string` | No | Label for the lookup button (default: "Lookup") |
 | `className` | `string` | No | Optional CSS class for the root container |
@@ -92,7 +92,7 @@ interface SiteLookupResult {
      apiBaseUrl={import.meta.env.VITE_AI_RENDER_URL || 'https://ai-render-service-weld.vercel.app'}
      onLookupComplete={(result) => {
        setSiteData(result);
-       // Pass result to cost estimator / renderer
+       // Only save site data here. Do not trigger a render — let the user trigger render separately.
      }}
    />
    ```

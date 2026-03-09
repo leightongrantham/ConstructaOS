@@ -14,6 +14,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import type { ConceptSeed } from '../services/generateConceptSeed.js';
 export type { ConceptSeed } from '../services/generateConceptSeed.js';
+import { resolveSupabaseConfig, type SupabaseConfig } from './supabaseConfig.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -55,7 +56,8 @@ export async function storeConceptSeed(
   projectId: string,
   conceptId: string,
   conceptSeed: ConceptSeed,
-  axonImageUrl?: string
+  axonImageUrl?: string,
+  sbOverride?: SupabaseConfig | null
 ): Promise<void> {
   const createdAt = new Date().toISOString();
 
@@ -70,12 +72,9 @@ export async function storeConceptSeed(
   const storagePath = `projects/${projectId}/concepts/${conceptId}/seed.json`;
   const jsonContent = JSON.stringify(storedConcept, null, 2);
 
-  // Check if Supabase is configured
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const supabaseKey = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const supabaseBucket = process.env.SUPABASE_STORAGE_BUCKET || 'concepts';
+  const sb = sbOverride !== undefined ? sbOverride : resolveSupabaseConfig();
 
-  if (!supabaseUrl || !supabaseKey) {
+  if (!sb) {
     // Fallback to local file system storage
     try {
       const localFilePath = join(LOCAL_STORAGE_DIR, `projects/${projectId}/concepts/${conceptId}/seed.json`);
@@ -98,15 +97,14 @@ export async function storeConceptSeed(
   }
 
   try {
-    // Upload to Supabase Storage
-    const uploadUrl = `${supabaseUrl}/storage/v1/object/${supabaseBucket}/${storagePath}`;
+    const uploadUrl = `${sb.url}/storage/v1/object/${sb.bucket}/${storagePath}`;
 
     const response = await fetch(uploadUrl, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${supabaseKey}`,
+        'Authorization': `Bearer ${sb.key}`,
         'Content-Type': 'application/json',
-        'x-upsert': 'true', // Allow overwriting if it exists
+        'x-upsert': 'true',
       },
       body: jsonContent,
     });
@@ -115,14 +113,12 @@ export async function storeConceptSeed(
       const errorText = await response.text();
       console.error(`Failed to store concept seed to Supabase: ${response.status} ${response.statusText}`);
       console.error('Error details:', errorText);
-      // Don't throw - concept generation still succeeds even if storage fails
       return;
     }
 
     console.log(`Concept seed stored successfully: ${storagePath}`);
   } catch (error) {
     console.error('Error storing concept seed to Supabase:', error);
-    // Don't throw - concept generation still succeeds even if storage fails
   }
 }
 
@@ -131,14 +127,13 @@ export async function storeConceptSeed(
  */
 export async function getConceptSeed(
   projectId: string,
-  conceptId: string
+  conceptId: string,
+  sbOverride?: SupabaseConfig | null
 ): Promise<StoredConcept | null> {
   const seedPath = `projects/${projectId}/concepts/${conceptId}/seed.json`;
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const supabaseKey = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const supabaseBucket = process.env.SUPABASE_STORAGE_BUCKET || 'concepts';
+  const sb = sbOverride !== undefined ? sbOverride : resolveSupabaseConfig();
 
-  if (!supabaseUrl || !supabaseKey) {
+  if (!sb) {
     // Fallback to local file system storage
     try {
       const localFilePath = join(LOCAL_STORAGE_DIR, seedPath);
@@ -171,7 +166,7 @@ export async function getConceptSeed(
     }
   }
 
-  const downloadUrl = `${supabaseUrl}/storage/v1/object/public/${supabaseBucket}/${seedPath}`;
+  const downloadUrl = `${sb.url}/storage/v1/object/public/${sb.bucket}/${seedPath}`;
 
   try {
     const response = await fetch(downloadUrl);
@@ -184,7 +179,6 @@ export async function getConceptSeed(
     }
 
     const data = (await response.json()) as unknown;
-    // Validate the response has required fields
     if (
       data &&
       typeof data === 'object' &&
@@ -211,9 +205,10 @@ export async function getConceptSeed(
  */
 export async function loadConceptSeed(
   projectId: string,
-  conceptId: string
+  conceptId: string,
+  sbOverride?: SupabaseConfig | null
 ): Promise<ConceptSeed | null> {
-  const stored = await getConceptSeed(projectId, conceptId);
+  const stored = await getConceptSeed(projectId, conceptId, sbOverride);
   return stored ? stored.conceptSeed : null;
 }
 
@@ -224,9 +219,10 @@ export async function loadConceptSeed(
 export async function saveConceptSeed(
   projectId: string,
   conceptId: string,
-  seed: ConceptSeed
+  seed: ConceptSeed,
+  sbOverride?: SupabaseConfig | null
 ): Promise<void> {
-  return storeConceptSeed(projectId, conceptId, seed);
+  return storeConceptSeed(projectId, conceptId, seed, undefined, sbOverride);
 }
 
 /**
@@ -238,18 +234,16 @@ export async function storeRenderedImage(
   projectId: string,
   conceptId: string,
   renderType: string,
-  imageBase64: string
+  imageBase64: string,
+  sbOverride?: SupabaseConfig | null
 ): Promise<string> {
   const imageBuffer = Buffer.from(imageBase64, 'base64');
   const fileName = getRenderFileName(renderType);
   const storagePath = `projects/${projectId}/concepts/${conceptId}/${fileName}`;
 
-  // Check if Supabase is configured
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const supabaseKey = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const supabaseBucket = process.env.SUPABASE_STORAGE_BUCKET || 'concepts';
+  const sb = sbOverride !== undefined ? sbOverride : resolveSupabaseConfig();
 
-  if (!supabaseUrl || !supabaseKey) {
+  if (!sb) {
     // Fallback to local file system storage
     try {
       const localFilePath = join(LOCAL_STORAGE_DIR, `projects/${projectId}/concepts/${conceptId}/${fileName}`);
@@ -271,15 +265,14 @@ export async function storeRenderedImage(
   }
 
   try {
-    // Upload to Supabase Storage
-    const uploadUrl = `${supabaseUrl}/storage/v1/object/${supabaseBucket}/${storagePath}`;
+    const uploadUrl = `${sb.url}/storage/v1/object/${sb.bucket}/${storagePath}`;
 
     const response = await fetch(uploadUrl, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${supabaseKey}`,
+        'Authorization': `Bearer ${sb.key}`,
         'Content-Type': 'image/png',
-        'x-upsert': 'true', // Allow overwriting if it exists
+        'x-upsert': 'true',
       },
       body: imageBuffer,
     });
@@ -288,11 +281,11 @@ export async function storeRenderedImage(
       const errorText = await response.text();
       console.error(`Failed to store rendered image to Supabase: ${response.status} ${response.statusText}`);
       console.error('Error details:', errorText);
-      throw new Error('Failed to store rendered image to Supabase');
+      console.error('Upload URL:', uploadUrl);
+      throw new Error(`Failed to store rendered image to Supabase: ${response.status} ${errorText}`);
     }
 
-    // Return public URL
-    const publicUrl = `${supabaseUrl}/storage/v1/object/public/${supabaseBucket}/${storagePath}`;
+    const publicUrl = `${sb.url}/storage/v1/object/public/${sb.bucket}/${storagePath}`;
     console.log(`Rendered image stored successfully: ${publicUrl}`);
     return publicUrl;
   } catch (error) {
@@ -309,23 +302,19 @@ export async function storeRenderedImage(
 export function getRenderedImageUrl(
   projectId: string,
   conceptId: string,
-  renderType: string
+  renderType: string,
+  sbOverride?: SupabaseConfig | null
 ): string | null {
   const fileName = getRenderFileName(renderType);
   const storagePath = `projects/${projectId}/concepts/${conceptId}/${fileName}`;
 
-  // Check if Supabase is configured
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const supabaseKey = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const supabaseBucket = process.env.SUPABASE_STORAGE_BUCKET || 'concepts';
+  const sb = sbOverride !== undefined ? sbOverride : resolveSupabaseConfig();
 
-  if (!supabaseUrl || !supabaseKey) {
-    // Fallback to local file system storage - return HTTP URL (served via /storage endpoint)
+  if (!sb) {
     return `/storage/${storagePath}`;
   }
 
-  // Return Supabase public URL
-  return `${supabaseUrl}/storage/v1/object/public/${supabaseBucket}/${storagePath}`;
+  return `${sb.url}/storage/v1/object/public/${sb.bucket}/${storagePath}`;
 }
 
 /**
@@ -336,17 +325,15 @@ export function getRenderedImageUrl(
 export async function loadRenderedImage(
   projectId: string,
   conceptId: string,
-  renderType: string
+  renderType: string,
+  sbOverride?: SupabaseConfig | null
 ): Promise<Buffer | null> {
   const fileName = getRenderFileName(renderType);
   const storagePath = `projects/${projectId}/concepts/${conceptId}/${fileName}`;
 
-  // Check if Supabase is configured
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const supabaseKey = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const supabaseBucket = process.env.SUPABASE_STORAGE_BUCKET || 'concepts';
+  const sb = sbOverride !== undefined ? sbOverride : resolveSupabaseConfig();
 
-  if (!supabaseUrl || !supabaseKey) {
+  if (!sb) {
     // Fallback to local file system storage
     try {
       const localFilePath = join(LOCAL_STORAGE_DIR, `projects/${projectId}/concepts/${conceptId}/${fileName}`);
@@ -364,8 +351,7 @@ export async function loadRenderedImage(
   }
 
   try {
-    // Download from Supabase Storage
-    const downloadUrl = `${supabaseUrl}/storage/v1/object/public/${supabaseBucket}/${storagePath}`;
+    const downloadUrl = `${sb.url}/storage/v1/object/public/${sb.bucket}/${storagePath}`;
 
     const response = await fetch(downloadUrl);
 

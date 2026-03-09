@@ -29,7 +29,7 @@ npm install
 2. Create a `.env` file (copy from `.env.example`):
 ```bash
 OPENAI_API_KEY=your_openai_api_key_here
-PORT=3001
+PORT=3000
 ```
 
 ## Running Locally
@@ -42,6 +42,14 @@ npm run dev
 
 This starts the server with hot-reloading using `tsx`.
 
+### Vercel dev (recommended for local)
+
+```bash
+vercel dev
+```
+
+One server (default port 3000) serves the UI and API; the frontend uses same-origin `/api/*` so no extra config is needed.
+
 ### Production Mode
 
 ```bash
@@ -52,7 +60,7 @@ npm run build
 npm start
 ```
 
-The server will start on the port specified in your `.env` file (default: 3001).
+The server will start on the port specified in your `.env` file (default: 3000).
 
 ### Type Checking
 
@@ -109,7 +117,7 @@ Upload an image to generate an axonometric concept rendering.
 
 **Example Request (Image):**
 ```bash
-curl -X POST http://localhost:3001/render \
+curl -X POST http://localhost:3000/render \
   -F "image=@path/to/your/sketch.png" \
   -F "projectId=my-project" \
   -F "renderType=axonometric"
@@ -117,7 +125,7 @@ curl -X POST http://localhost:3001/render \
 
 **Example Request (PDF):**
 ```bash
-curl -X POST http://localhost:3001/render \
+curl -X POST http://localhost:3000/render \
   -F "image=@path/to/your/sketch.pdf" \
   -F "projectId=my-project" \
   -F "renderType=axonometric"
@@ -134,7 +142,7 @@ curl -X POST http://localhost:3001/render \
 
 To save the response image:
 ```bash
-curl -X POST http://localhost:3001/render \
+curl -X POST http://localhost:3000/render \
   -F "image=@sketch.png" \
   | jq -r '.imageBase64' \
   | base64 -d > output.png
@@ -143,7 +151,7 @@ curl -X POST http://localhost:3001/render \
 ### Health Check
 
 ```bash
-curl http://localhost:3001/health
+curl http://localhost:3000/health
 ```
 
 Returns: `{"status":"ok"}`

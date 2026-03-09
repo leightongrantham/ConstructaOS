@@ -9,6 +9,7 @@
   },
   "scripts": {
     "build": "npm run lint:deprecated && tsc",
+    "build:demo": "vite build",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "type-check": "tsc --noEmit",
@@ -20,12 +21,15 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@turf/turf": "^7.1.0",
+    "@upstash/redis": "^1.34.3",
     "@vercel/node": "^5.5.20",
     "canvas": "^3.2.0",
     "cors": "^2.8.5",
     "dommatrix": "^0.1.1",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
+    "express-async-errors": "^3.1.1",
     "multer": "^1.4.5-lts.1",
     "openai": "^4.20.0",
     "pdfjs-dist": "^5.4.530"
@@ -36,8 +40,12 @@
     "@types/multer": "^1.4.11",
     "@types/node": "^20.0.0",
     "@types/pdfjs-dist": "^2.10.377",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
     "ts-node": "^10.9.2",
     "tsx": "^4.7.0",
-    "typescript": "^5.3.0"
+    "typescript": "^5.3.0",
+    "vite": "^7.3.1",
+    "zustand": "^5.0.11"
   }
 }

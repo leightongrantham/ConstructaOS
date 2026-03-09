@@ -268,6 +268,9 @@ export function buildConceptPrompt(
   inputs: ConceptBrief | ConceptInputs,
   options?: BuildConceptPromptOptions
 ): BuildConceptPromptResult {
+  if (inputs == null || typeof inputs !== 'object') {
+    throw new Error('buildConceptPrompt: inputs is required and must be a ConceptBrief or ConceptInputs object');
+  }
   // Normalize to ConceptBrief format
   const brief: ConceptBrief = 'proposedDesign' in inputs
     ? inputs
@@ -307,6 +310,7 @@ export function buildConceptPrompt(
       conceptSeed: options.conceptSeed,
       brief,
       styleLock,
+      hasReferenceAxon: options.hasReferenceAxon,
     };
     if (options.baselineFootprintScaleOverride) {
       planArgs.baselineFootprintScaleOverride = options.baselineFootprintScaleOverride;
@@ -316,7 +320,7 @@ export function buildConceptPrompt(
     // Return immediately - do not append any other addenda or output instructions
     return {
       prompt,
-      promptVersion: 'plan_isometric_cutaway_v1',
+      promptVersion: 'plan_isometric_cutaway_v2',
     };
   }
   
@@ -387,6 +391,14 @@ export function buildConceptPrompt(
       'Existing building is estimated from mapping data; footprint and storeys may be approximate. Not a measured survey.\n' +
       'Treat this as fixed baseline massing.'
     );
+    // So the render reflects footprint-derived classification: explicit visual instruction
+    if (existingBaseline.buildingForm === 'Terraced') {
+      parts.push('Depict the existing building as terraced: part of a continuous row with party walls to one or both sides (mid-terrace or end-of-terrace).');
+    } else if (existingBaseline.buildingForm === 'Semi-detached') {
+      parts.push('Depict the existing building as semi-detached: one shared party wall with a neighbouring house, the other side free.');
+    } else if (existingBaseline.buildingForm === 'Detached') {
+      parts.push('Depict the existing building as detached: standalone with clear gaps on both sides, no shared walls with neighbours.');
+    }
     if (options?.baselineFootprintScaleOverride) {
       const scaleLabel = options.baselineFootprintScaleOverride === 'compact' ? 'small' : options.baselineFootprintScaleOverride === 'wide' ? 'large' : 'medium';
       parts.push(`Interpret existing baseline massing as ${scaleLabel} scale for proportion and base massing; footprint geometry is unchanged.`);

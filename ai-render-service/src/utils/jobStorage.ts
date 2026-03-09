@@ -7,6 +7,7 @@ import { writeFile, readFile, mkdir } from 'fs/promises';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import type { RenderJob } from '../types/job.js';
+import { resolveSupabaseConfig, type SupabaseConfig } from './supabaseConfig.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -20,16 +21,13 @@ const LOCAL_STORAGE_DIR = process.env.VERCEL
 /**
  * Store a render job
  */
-export async function storeJob(job: RenderJob): Promise<void> {
+export async function storeJob(job: RenderJob, sbOverride?: SupabaseConfig | null): Promise<void> {
   const storagePath = `jobs/${job.projectId}/${job.jobId}.json`;
   const jsonContent = JSON.stringify(job, null, 2);
 
-  // Check if Supabase is configured
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const supabaseKey = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const supabaseBucket = process.env.SUPABASE_STORAGE_BUCKET || 'concepts';
+  const sb = sbOverride !== undefined ? sbOverride : resolveSupabaseConfig();
 
-  if (!supabaseUrl || !supabaseKey) {
+  if (!sb) {
     // Fallback to local file system storage
     try {
       const localFilePath = join(LOCAL_STORAGE_DIR, storagePath);
@@ -47,13 +45,12 @@ export async function storeJob(job: RenderJob): Promise<void> {
   }
 
   try {
-    // Upload to Supabase Storage
-    const uploadUrl = `${supabaseUrl}/storage/v1/object/${supabaseBucket}/${storagePath}`;
+    const uploadUrl = `${sb.url}/storage/v1/object/${sb.bucket}/${storagePath}`;
 
     const response = await fetch(uploadUrl, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${supabaseKey}`,
+        'Authorization': `Bearer ${sb.key}`,
         'Content-Type': 'application/json',
         'x-upsert': 'true',
       },
@@ -77,14 +74,12 @@ export async function storeJob(job: RenderJob): Promise<void> {
 /**
  * Retrieve a render job
  */
-export async function getJob(projectId: string, jobId: string): Promise<RenderJob | null> {
+export async function getJob(projectId: string, jobId: string, sbOverride?: SupabaseConfig | null): Promise<RenderJob | null> {
   const storagePath = `jobs/${projectId}/${jobId}.json`;
-  
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const supabaseKey = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const supabaseBucket = process.env.SUPABASE_STORAGE_BUCKET || 'concepts';
 
-  if (!supabaseUrl || !supabaseKey) {
+  const sb = sbOverride !== undefined ? sbOverride : resolveSupabaseConfig();
+
+  if (!sb) {
     // Fallback to local file system storage
     try {
       const localFilePath = join(LOCAL_STORAGE_DIR, storagePath);
@@ -99,7 +94,7 @@ export async function getJob(projectId: string, jobId: string): Promise<RenderJo
     }
   }
 
-  const downloadUrl = `${supabaseUrl}/storage/v1/object/public/${supabaseBucket}/${storagePath}`;
+  const downloadUrl = `${sb.url}/storage/v1/object/public/${sb.bucket}/${storagePath}`;
 
   try {
     const response = await fetch(downloadUrl);

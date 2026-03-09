@@ -4,7 +4,7 @@
  */
 
 import { geocodeAddress } from './geocodeAddress.js';
-import { queryNearbyBuildingsOverpass } from './queryNearbyBuildingsOverpass.js';
+import { queryNearbyBuildingsOverpass, LOOKUP_FAILED } from './queryNearbyBuildingsOverpass.js';
 import { selectPrimaryBuilding } from './selectPrimaryBuilding.js';
 import { inferExistingBaseline, type ExistingBaseline } from './inferExistingBaseline.js';
 
@@ -97,7 +97,25 @@ export async function runSiteLookup(body: SiteLookupRequest): Promise<SiteLookup
     displayName = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
   }
 
-  const { buildings } = await queryNearbyBuildingsOverpass(lat, lng, 40);
+  let buildings: Awaited<ReturnType<typeof queryNearbyBuildingsOverpass>>['buildings'];
+  try {
+    const result = await queryNearbyBuildingsOverpass(lat, lng, 20);
+    buildings = result.buildings;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg === LOOKUP_FAILED) {
+      return {
+        lat,
+        lng,
+        displayName,
+        primary: defaultBaseline(),
+        candidates: [],
+        neighbourPolygons: [],
+        disclaimer: DISCLAIMER,
+      };
+    }
+    throw err;
+  }
 
   if (buildings.length === 0) {
     return {

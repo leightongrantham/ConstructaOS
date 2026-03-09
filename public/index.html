@@ -811,22 +811,13 @@
     const promptHeader = document.getElementById('prompt-header');
     const promptContent = document.getElementById('prompt-content');
     const promptToggle = document.getElementById('prompt-toggle');
-    // API URL configuration:
-    // - On localhost: use http://localhost:3001 (local dev server)
-    // - On deployed (Vercel): use same origin (empty string = relative URLs)
-    // Default to same origin (relative URLs) unless explicitly on localhost
-    const hostname = window.location.hostname || window.location.host || '';
-    const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('localhost:');
-    // Only use localhost URL if we're explicitly on localhost, otherwise use same origin
-    const API_URL = (hostname === 'localhost' || hostname === '127.0.0.1') ? 'http://localhost:3001' : '';
-    
-    // Debug logging to help diagnose issues
-    console.log('API configuration:', { 
-      hostname, 
-      origin: window.location.origin,
-      isLocalhost, 
-      API_URL: API_URL || '(same origin)' 
-    });
+    // API URL: set window.API_BASE_URL before load to override. Else: same origin (works with vercel dev and deployed).
+    // For a separate API server (e.g. npm run dev on 3000 while frontend on 5173), set window.API_BASE_URL = 'http://localhost:3000'.
+    const API_URL = (typeof window.API_BASE_URL === 'string' && window.API_BASE_URL !== '')
+      ? window.API_BASE_URL.replace(/\/$/, '')
+      : '';
+
+    console.log('API configuration:', { origin: window.location.origin, API_URL: API_URL || '(same origin)' });
 
     // Store current concept state
     let currentConceptId = null;
@@ -2208,21 +2199,29 @@
           body: JSON.stringify(payload),
         });
 
+        const createBodyText = await createResponse.text();
+        let jobData;
+        try {
+          jobData = createBodyText ? JSON.parse(createBodyText) : null;
+        } catch (_) {
+          jobData = null;
+        }
+
         if (!createResponse.ok) {
-          const ct = createResponse.headers.get('content-type') || '';
           let errorMsg = 'Failed to create job';
-          if (ct.includes('application/json')) {
-            try {
-              const error = await createResponse.json();
-              errorMsg = error.message || error.error || errorMsg;
-            } catch (_) {}
-          } else if (createResponse.status === 404) {
+          if (createResponse.status === 404) {
             errorMsg = 'Jobs API not found (404). Ensure /api/jobs/render is deployed.';
+          } else if (jobData && (jobData.message || jobData.error)) {
+            errorMsg = jobData.message || jobData.error;
+          } else if (createBodyText) {
+            errorMsg = createBodyText.slice(0, 200);
           }
           throw new Error(errorMsg);
         }
 
-        const jobData = await createResponse.json();
+        if (!jobData || !jobData.jobId) {
+          throw new Error('Invalid job response: missing jobId');
+        }
         const { jobId, conceptId: finalConceptId } = jobData;
 
         showStatus('Generating concept', 'info');

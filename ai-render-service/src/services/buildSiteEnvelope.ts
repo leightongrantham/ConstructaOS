@@ -142,6 +142,9 @@ export function buildSiteEnvelope(
   inputs: ConceptBrief | ConceptInputs,
   options?: BuildSiteEnvelopeOptions
 ): SiteEnvelope {
+  if (inputs == null || typeof inputs !== 'object') {
+    throw new Error('buildSiteEnvelope: inputs is required and must be a ConceptBrief or ConceptInputs object');
+  }
   // Convert ConceptBrief to legacy format if needed
   const legacyInputs: ConceptInputs = 'proposedDesign' in inputs
     ? conceptBriefToLegacyInputs(inputs)

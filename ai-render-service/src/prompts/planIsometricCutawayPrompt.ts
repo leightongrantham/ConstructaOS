@@ -14,6 +14,8 @@ export interface BuildIsometricPlanPromptArgs {
   styleLock: string;
   /** Optional footprint scale override for massing hint only; does not change footprint geometry (compact | medium | wide) */
   baselineFootprintScaleOverride?: string;
+  /** When true, a reference image (often an exterior axonometric) is attached; prompt will tell model to use it for style only, not viewpoint */
+  hasReferenceAxon?: boolean;
 }
 
 /**
@@ -21,7 +23,7 @@ export interface BuildIsometricPlanPromptArgs {
  * Uses ONLY isometric cutaway language - no references to top-down or orthographic plans
  */
 export function buildIsometricPlanPrompt(args: BuildIsometricPlanPromptArgs): string {
-  const { conceptSeed, brief, styleLock, baselineFootprintScaleOverride } = args;
+  const { conceptSeed, brief, styleLock, baselineFootprintScaleOverride, hasReferenceAxon } = args;
   const { existingContext, proposedDesign } = brief;
   
   const parts: string[] = [];
@@ -31,15 +33,22 @@ export function buildIsometricPlanPrompt(args: BuildIsometricPlanPromptArgs): st
     'You are an architectural designer creating early-stage concept visuals.\nThe output is a conceptual design study, not a technical drawing.'
   );
   
-  // SECTION 2: CAMERA / VIEW (STRICT - ISOMETRIC CUTAWAY ONLY)
+  // When a reference image is attached (often an exterior axonometric), insist on interior cutaway — do not copy the reference's viewpoint
+  if (hasReferenceAxon) {
+    parts.push(
+      '\nREFERENCE IMAGE (if attached): Use it only for line style, paper texture, and tonal treatment. Do NOT copy its viewpoint. The reference may show an exterior view of a building; your output MUST be an interior cutaway (roof/upper walls removed, dollhouse view showing floor plan and rooms).'
+    );
+  }
+  
+  // SECTION 2: CAMERA / VIEW (STRICT - INTERIOR CUTAWAY, NOT EXTERIOR AXON)
   parts.push(
     `Camera / view (STRICT, must follow):
-- Produce an ISOMETRIC / AXONOMETRIC interior cutaway floor plan (3D-like).
-- View angle ~30–45 degrees, showing floor plane and wall thickness.
+- Produce an ISOMETRIC INTERIOR CUTAWAY: the building with roof and/or upper walls removed so the floor plan and rooms are visible from above at an angle (like looking into a dollhouse).
+- View angle ~30–45 degrees from above, showing floor plane, room layout, and wall thickness. Interior focus.
+- DO NOT produce a full exterior axonometric view of the building (no solid roof, no view of the outside only). This must be a cutaway showing the interior.
 - DO NOT produce a flat overhead view from directly above.
 - DO NOT produce a flat 2D schematic drawing.
-- DO NOT produce a flat schematic.
-- The illustration must show depth and perspective, like looking into a dollhouse or architectural model.
+- The illustration must show depth and perspective, like looking into a dollhouse or architectural model with the top cut away.
 - This is a 3D cutaway illustration with visible depth and spatial relationships.`
   );
   
@@ -65,6 +74,13 @@ export function buildIsometricPlanPrompt(args: BuildIsometricPlanPromptArgs): st
       'Existing building is estimated from mapping data; footprint and storeys may be approximate. Not a measured survey.\n' +
       'Treat this as fixed baseline massing.'
     );
+    if (existingBaseline.buildingForm === 'Terraced') {
+      parts.push('Depict the existing building as terraced: part of a continuous row with party walls to one or both sides (mid-terrace or end-of-terrace).');
+    } else if (existingBaseline.buildingForm === 'Semi-detached') {
+      parts.push('Depict the existing building as semi-detached: one shared party wall with a neighbouring house, the other side free.');
+    } else if (existingBaseline.buildingForm === 'Detached') {
+      parts.push('Depict the existing building as detached: standalone with clear gaps on both sides, no shared walls with neighbours.');
+    }
     if (baselineFootprintScaleOverride) {
       const scaleLabel = baselineFootprintScaleOverride === 'compact' ? 'small' : baselineFootprintScaleOverride === 'wide' ? 'large' : 'medium';
       parts.push(`Interpret existing baseline massing as ${scaleLabel} scale for proportion and base massing; footprint geometry is unchanged.`);
@@ -277,13 +293,19 @@ Spatial Organization:
   return finalPrompt;
 }
 
-// Helper formatting functions (minimal, focused on brief summary)
-function formatProjectType(type: string): string {
-  return type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+// Helper: safe string for replace-based formatting (Lovable/incomplete payloads may send undefined)
+function safeReplaceFormat(value: string | undefined | null, fallback = 'Not specified'): string {
+  if (value == null || typeof value !== 'string') return fallback;
+  return value.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
 }
 
-function formatBuildingForm(form: string): string {
-  return form.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+// Helper formatting functions (minimal, focused on brief summary) — all null-safe for incomplete payloads
+function formatProjectType(type: string | undefined): string {
+  return safeReplaceFormat(type);
+}
+
+function formatBuildingForm(form: string | undefined): string {
+  return safeReplaceFormat(form);
 }
 
 /** Map ExistingBaseline buildingForm (e.g. 'Semi-detached') to brief BuildingForm (e.g. 'semi_detached') for comparison. */
@@ -297,7 +319,8 @@ function baselineFormToBrief(form: string): string | undefined {
   return map[form];
 }
 
-function formatStoreys(storeys: string): string {
+function formatStoreys(storeys: string | undefined): string {
+  if (storeys == null) return 'Not specified';
   const map: Record<string, string> = {
     'one': '1',
     'two': '2',
@@ -307,12 +330,13 @@ function formatStoreys(storeys: string): string {
 }
 
 /** Format baseline storeys ('1'|'2'|'3+'|'Unknown') for prompt text. Single source: site/footprint with override. */
-function formatBaselineStoreys(storeys: '1' | '2' | '3+' | 'Unknown'): string {
-  if (storeys === 'Unknown') return '~2 (estimated, no survey)';
+function formatBaselineStoreys(storeys: '1' | '2' | '3+' | 'Unknown' | undefined): string {
+  if (storeys == null || storeys === 'Unknown') return '~2 (estimated, no survey)';
   return storeys;
 }
 
-function formatNumberOfPlots(plots: string): string {
+function formatNumberOfPlots(plots: string | undefined): string {
+  if (plots == null) return 'Not specified';
   const map: Record<string, string> = {
     'one': '1',
     'two': '2',
@@ -322,7 +346,8 @@ function formatNumberOfPlots(plots: string): string {
   return map[plots] || plots;
 }
 
-function formatFloorAreaRange(range: string): string {
+function formatFloorAreaRange(range: string | undefined): string {
+  if (range == null) return 'Not specified';
   const map: Record<string, string> = {
     '0_25': '0–25',
     '25_50': '25–50',
@@ -335,11 +360,12 @@ function formatFloorAreaRange(range: string): string {
   return map[range] ?? range.replace(/_/g, '-');
 }
 
-function formatFootprintScale(scale: string): string {
-  return scale.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+function formatFootprintScale(scale: string | undefined): string {
+  return safeReplaceFormat(scale);
 }
 
-function formatBedrooms(bedrooms: string): string {
+function formatBedrooms(bedrooms: string | undefined): string {
+  if (bedrooms == null) return 'Not specified';
   const map: Record<string, string> = {
     'zero': '0 (not included)',
     'studio': 'Studio',
@@ -347,12 +373,14 @@ function formatBedrooms(bedrooms: string): string {
     'two': '2',
     'three': '3',
     'four': '4',
+    'four_plus': '4+',
     'five_plus': '5+',
   };
   return map[bedrooms] ?? bedrooms;
 }
 
-function formatBathrooms(bathrooms: string): string {
+function formatBathrooms(bathrooms: string | undefined): string {
+  if (bathrooms == null) return 'Not specified';
   const map: Record<string, string> = {
     'zero': '0 (not included)',
     'one': '1',
@@ -362,31 +390,32 @@ function formatBathrooms(bathrooms: string): string {
   return map[bathrooms] ?? bathrooms;
 }
 
-function formatKitchenType(type: string): string {
-  return type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+function formatKitchenType(type: string | undefined): string {
+  return safeReplaceFormat(type);
 }
 
-function formatLivingSpaces(spaces: string): string {
-  return spaces.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+function formatLivingSpaces(spaces: string | undefined): string {
+  return safeReplaceFormat(spaces);
 }
 
-function formatRoofType(type: string): string {
-  return type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+function formatRoofType(type: string | undefined): string {
+  return safeReplaceFormat(type);
 }
 
-function formatMassingPreference(pref: string): string {
-  return pref.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+function formatMassingPreference(pref: string | undefined): string {
+  return safeReplaceFormat(pref);
 }
 
-function formatOrientation(orientation: string): string {
-  return orientation.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+function formatOrientation(orientation: string | undefined): string {
+  return safeReplaceFormat(orientation);
 }
 
-function formatDensity(density: string): string {
-  return density.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+function formatDensity(density: string | undefined): string {
+  return safeReplaceFormat(density);
 }
 
-function formatExtensionType(type: string): string {
+function formatExtensionType(type: string | undefined): string {
+  if (type == null) return 'Not specified';
   const map: Record<string, string> = {
     rear: 'Rear — new volume attached to the back of the existing building only',
     side: 'Side — new volume attached to one side of the existing building only',
@@ -398,7 +427,8 @@ function formatExtensionType(type: string): string {
   return map[type] || type.replace(/_/g, ' ');
 }
 
-function extensionPositioningRule(type: string): string {
+function extensionPositioningRule(type: string | undefined): string {
+  if (type == null) return '- Attach the new extension to the existing building in a coherent position (rear or side).';
   const map: Record<string, string> = {
     rear: '- Attach the new volume to the BACK of the existing building only. Do not place it to the side or front.',
     side: '- Attach the new volume to ONE SIDE of the existing building only. Do not place it to the rear or front.',

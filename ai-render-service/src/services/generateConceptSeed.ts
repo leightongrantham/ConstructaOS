@@ -51,9 +51,10 @@ const DEFAULT_SEED: ConceptSeed = {
 };
 
 /**
- * Validates and normalizes a concept seed from potentially malformed JSON
+ * Validates and normalizes a concept seed from potentially malformed JSON.
+ * Exported so the API can validate client-supplied seeds (e.g. from Lovable).
  */
-function validateAndNormalizeSeed(seed: unknown): ConceptSeed {
+export function validateAndNormalizeSeed(seed: unknown): ConceptSeed {
   if (!seed || typeof seed !== 'object') {
     console.warn('Invalid seed: not an object, using defaults');
     return DEFAULT_SEED;

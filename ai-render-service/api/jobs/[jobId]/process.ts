@@ -15,7 +15,11 @@ function getApp() {
 }
 
 export default function handler(req: VercelRequest, res: VercelResponse) {
-  const jobId = (req.query?.jobId as string) || '';
+  let jobId = (req.query?.jobId as string) || '';
+  if (!jobId && typeof req.url === 'string') {
+    const match = req.url.match(/\/api\/jobs\/([^/?]+)\/process/);
+    jobId = match?.[1] ?? '';
+  }
   const path = jobId ? `/api/jobs/${jobId}/process` : '/api/jobs/process';
   const query = (typeof req.url === 'string' && req.url.includes('?')) ? req.url.slice(req.url.indexOf('?')) : '';
   const originalUrl = path + query;

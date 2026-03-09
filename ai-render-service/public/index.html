@@ -40,6 +40,16 @@
       margin-bottom: 20px;
     }
 
+    #site-lookup-react-root {
+      width: 100%;
+      min-width: 0;
+    }
+    /* Override global button width so Lookup button doesn't expand; input gets remaining space */
+    #site-lookup-react-root button {
+      width: auto;
+      margin-top: 0;
+    }
+
     label {
       display: block;
       margin-bottom: 8px;
@@ -400,32 +410,12 @@
       <div class="section-divider"></div>
       <h2 class="section-title">Site Location</h2>
 
-      <div class="form-group">
-        <label for="address">Address / Postcode</label>
-        <div style="display: flex; gap: 10px;">
-          <input type="text" id="address" name="address" placeholder="Enter address or postcode" style="flex: 1;">
-          <button type="button" id="lookup-btn" style="width: auto; margin: 0; white-space: nowrap;">Lookup</button>
-        </div>
-      </div>
+      <!-- React SiteLookup component (address, lookup, footprint map, confirm) -->
+      <div class="form-group" id="site-lookup-react-root"></div>
 
       <div class="form-group" id="location-display" style="display: none;">
         <div style="padding: 12px; background: #e3f2fd; border-left: 4px solid #2196f3; border-radius: 4px; color: #1565c0;">
           <strong>Location:</strong> <span id="location-name"></span>
-        </div>
-      </div>
-
-      <!-- Footprint confirmation (after site lookup, before baseline summary) -->
-      <div class="form-group" id="footprint-confirmation" style="display: none;">
-        <div class="footprint-confirmation-card" style="padding: 20px; background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08);">
-          <p id="footprint-confirmation-message" class="footprint-confirmation-message" style="margin: 0 0 16px 0; font-size: 15px; color: #333;">We've identified this building — please confirm it's correct.</p>
-          <div id="footprint-map-container" style="width: 100%; height: 280px; background: #f5f5f5; border-radius: 6px; overflow: hidden; margin-bottom: 16px;"></div>
-          <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 16px;">
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <span style="font-size: 13px; color: #666;">Confidence:</span>
-              <span id="footprint-confidence-badge" class="footprint-confidence-badge" style="display: inline-block; padding: 4px 10px; border-radius: 12px; font-size: 13px; font-weight: 500;"></span>
-            </div>
-            <button type="button" id="confirm-footprint-btn" class="btn btn-primary" style="min-width: 140px;">Confirm footprint</button>
-          </div>
         </div>
       </div>
 
@@ -787,6 +777,9 @@
     </div>
   </div>
 
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="/site-lookup-demo.js"></script>
   <script>
     const form = document.getElementById('render-form');
     const submitBtn = document.getElementById('submit-btn');
@@ -811,22 +804,13 @@
     const promptHeader = document.getElementById('prompt-header');
     const promptContent = document.getElementById('prompt-content');
     const promptToggle = document.getElementById('prompt-toggle');
-    // API URL configuration:
-    // - On localhost: use http://localhost:3001 (local dev server)
-    // - On deployed (Vercel): use same origin (empty string = relative URLs)
-    // Default to same origin (relative URLs) unless explicitly on localhost
-    const hostname = window.location.hostname || window.location.host || '';
-    const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('localhost:');
-    // Only use localhost URL if we're explicitly on localhost, otherwise use same origin
-    const API_URL = (hostname === 'localhost' || hostname === '127.0.0.1') ? 'http://localhost:3001' : '';
+    // API URL: set window.API_BASE_URL before load to override. Else: same origin (works with vercel dev and deployed).
+    // For a separate API server (e.g. npm run dev on 3000 while frontend on 5173), set window.API_BASE_URL = 'http://localhost:3000'.
+    const API_URL = (typeof window.API_BASE_URL === 'string' && window.API_BASE_URL !== '')
+      ? window.API_BASE_URL.replace(/\/$/, '')
+      : '';
     
-    // Debug logging to help diagnose issues
-    console.log('API configuration:', { 
-      hostname, 
-      origin: window.location.origin,
-      isLocalhost, 
-      API_URL: API_URL || '(same origin)' 
-    });
+    console.log('API configuration:', { origin: window.location.origin, API_URL: API_URL || '(same origin)' });
 
     // Store current concept state
     let currentConceptId = null;
@@ -868,7 +852,7 @@
     // Listen for output type changes
     outputTypeSelect.addEventListener('change', updateConceptStatusIndicator);
 
-    // Site location elements
+    // Site location elements (vanilla footprint UI removed; React component used)
     const addressInput = document.getElementById('address');
     const lookupBtn = document.getElementById('lookup-btn');
     const locationDisplay = document.getElementById('location-display');
@@ -878,10 +862,6 @@
     const candidateSelector = document.getElementById('candidate-selector');
     const candidateButtons = document.getElementById('candidate-buttons');
     const baselineOverrides = document.getElementById('baseline-overrides');
-    const footprintConfirmation = document.getElementById('footprint-confirmation');
-    const footprintMapContainer = document.getElementById('footprint-map-container');
-    const footprintConfidenceBadge = document.getElementById('footprint-confidence-badge');
-    const confirmFootprintBtn = document.getElementById('confirm-footprint-btn');
     
     // Store site lookup data
     let siteContextSummary = null;
@@ -890,6 +870,29 @@
     let selectedBuildingId = null;
     /** When confidence is Low: null = primary selected, number = candidate id selected. Set on map click; committed on Confirm. */
     let pendingFootprintSelection = null;
+
+    // Mount React SiteLookup component (replaces vanilla address + lookup + footprint confirmation)
+    (function () {
+      var root = document.getElementById('site-lookup-react-root');
+      if (!root || !window.ConstructaOS || !window.ConstructaOS.mountSiteLookup) return;
+      window.ConstructaOS.mountSiteLookup(root, {
+        apiBaseUrl: API_URL || '',
+        onLookupComplete: function (result) {
+          geocodeResult = { lat: result.lat, lng: result.lng, displayName: result.displayName };
+          siteLookupResult = {
+            primary: result.primary,
+            candidates: result.candidates || [],
+            neighbourPolygons: result.neighbourPolygons,
+            disclaimer: result.disclaimer
+          };
+          selectedBuildingId = result.selectedBuildingId;
+          if (locationDisplay) locationDisplay.style.display = 'block';
+          if (locationName) locationName.textContent = result.displayName;
+          showBaselineFromLookup(siteLookupResult);
+          showStatus('Site lookup completed successfully!', 'success');
+        }
+      });
+    })();
 
     function drawFootprintMap(primaryPolygon, neighbourPolygons, container, options) {
       if (!primaryPolygon || primaryPolygon.length < 3) return;
@@ -987,10 +990,12 @@
       if (!siteLookupResult) return;
       const primary = siteLookupResult.primary;
       if (!primary.footprintPolygon || primary.footprintPolygon.length < 3) return;
+      var container = document.getElementById('footprint-map-container');
+      if (!container) return;
       drawFootprintMap(
         primary.footprintPolygon,
         siteLookupResult.neighbourPolygons || [],
-        footprintMapContainer,
+        container,
         {
           candidates: siteLookupResult.candidates || [],
           selectedId: pendingFootprintSelection,
@@ -1391,106 +1396,89 @@
     // Initialize on page load
     updateExistingContextInputs();
 
-    // Handle address lookup
-    lookupBtn.addEventListener('click', async () => {
-      const address = addressInput.value.trim();
-      if (!address) {
-        showStatus('Please enter an address or postcode', 'error');
-        return;
-      }
-
-      lookupBtn.disabled = true;
-      showStatus('Checking feasibility', 'info');
-      locationDisplay.style.display = 'none';
-      footprintConfirmation.style.display = 'none';
-      baselineSummary.style.display = 'none';
-      candidateSelector.style.display = 'none';
-      baselineOverrides.style.display = 'none';
-      var advWrap = document.getElementById('advanced-options-wrap');
-      if (advWrap) advWrap.style.display = 'none';
-      siteContextSummary = null;
-      geocodeResult = null;
-      siteLookupResult = null;
-      selectedBuildingId = null;
-      pendingFootprintSelection = null;
-
-      try {
-        // Call site-lookup API
-        const lookupResponse = await fetch(`${API_URL}/api/site-lookup`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ query: address }),
-        });
-
-        if (!lookupResponse.ok) {
-          const error = await lookupResponse.json();
-          throw new Error(error.error || 'Site lookup failed');
+    // Handle address lookup — replaced by React SiteLookup; keep block no-op when elements absent
+    if (lookupBtn && addressInput) {
+      lookupBtn.addEventListener('click', async () => {
+        const address = addressInput.value.trim();
+        if (!address) {
+          showStatus('Please enter an address or postcode', 'error');
+          return;
         }
-
-        const lookupData = await lookupResponse.json();
-        siteLookupResult = lookupData;
-        geocodeResult = {
-          lat: lookupData.lat,
-          lng: lookupData.lng,
-          displayName: lookupData.displayName,
-        };
-        
-        // Display location name
-        locationName.textContent = lookupData.displayName;
-        locationDisplay.style.display = 'block';
-
-        const primary = lookupData.primary;
-        const hasFootprint = primary.footprintPolygon && primary.footprintPolygon.length >= 3;
-
-        if (hasFootprint) {
-          footprintConfidenceBadge.textContent = primary.confidence;
-          footprintConfidenceBadge.className = 'footprint-confidence-badge ' + (primary.confidence || '').toLowerCase();
-          const footprintMessageEl = document.getElementById('footprint-confirmation-message');
-          const isLowConfidence = primary.confidence === 'Low' && lookupData.candidates && lookupData.candidates.length > 0;
-          if (isLowConfidence) {
-            pendingFootprintSelection = null;
-            if (footprintMessageEl) footprintMessageEl.textContent = "We found several buildings nearby. Click the footprint that matches your building.";
-            redrawFootprintMapForSelection();
-          } else {
-            if (footprintMessageEl) footprintMessageEl.textContent = "We've identified this building — please confirm it's correct.";
-            drawFootprintMap(primary.footprintPolygon, lookupData.neighbourPolygons || [], footprintMapContainer);
-          }
-          footprintConfirmation.style.display = 'block';
-        } else {
-          // No footprint to confirm — show baseline summary directly
-          showBaselineFromLookup(lookupData);
-        }
-
-        showStatus('Site lookup completed successfully!', 'success');
-      } catch (error) {
-        console.error('Lookup error:', error);
-        showStatus(`Error: ${error.message}`, 'error');
-        locationDisplay.style.display = 'none';
-        footprintConfirmation.style.display = 'none';
+        lookupBtn.disabled = true;
+        showStatus('Checking feasibility', 'info');
+        if (locationDisplay) locationDisplay.style.display = 'none';
         baselineSummary.style.display = 'none';
-        candidateSelector.style.display = 'none';
-        baselineOverrides.style.display = 'none';
-        var advWrapErr = document.getElementById('advanced-options-wrap');
-        if (advWrapErr) advWrapErr.style.display = 'none';
+        if (candidateSelector) candidateSelector.style.display = 'none';
+        if (baselineOverrides) baselineOverrides.style.display = 'none';
+        var advWrap = document.getElementById('advanced-options-wrap');
+        if (advWrap) advWrap.style.display = 'none';
+        siteContextSummary = null;
         geocodeResult = null;
         siteLookupResult = null;
-      } finally {
-        lookupBtn.disabled = false;
-      }
-    });
+        selectedBuildingId = null;
+        pendingFootprintSelection = null;
+        try {
+          const lookupResponse = await fetch(`${API_URL}/api/site-lookup`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: address }),
+          });
+          if (!lookupResponse.ok) {
+            const error = await lookupResponse.json();
+            throw new Error(error.error || 'Site lookup failed');
+          }
+          const lookupData = await lookupResponse.json();
+          siteLookupResult = lookupData;
+          geocodeResult = { lat: lookupData.lat, lng: lookupData.lng, displayName: lookupData.displayName };
+          if (locationName) locationName.textContent = lookupData.displayName;
+          if (locationDisplay) locationDisplay.style.display = 'block';
+          const primary = lookupData.primary;
+          const hasFootprint = primary.footprintPolygon && primary.footprintPolygon.length >= 3;
+          if (hasFootprint) {
+            var fpConf = document.getElementById('footprint-confirmation');
+            var fpMap = document.getElementById('footprint-map-container');
+            var fpBadge = document.getElementById('footprint-confidence-badge');
+            if (fpBadge) { fpBadge.textContent = primary.confidence; fpBadge.className = 'footprint-confidence-badge ' + (primary.confidence || '').toLowerCase(); }
+            var footprintMessageEl = document.getElementById('footprint-confirmation-message');
+            var isLowConfidence = primary.confidence === 'Low' && lookupData.candidates && lookupData.candidates.length > 0;
+            if (isLowConfidence && footprintMessageEl) footprintMessageEl.textContent = "We found several buildings nearby. Click the footprint that matches your building.";
+            else if (footprintMessageEl) footprintMessageEl.textContent = "We've identified this building — please confirm it's correct.";
+            if (fpConf) fpConf.style.display = 'block';
+            if (fpMap) drawFootprintMap(primary.footprintPolygon, lookupData.neighbourPolygons || [], fpMap, isLowConfidence ? { candidates: lookupData.candidates || [], selectedId: pendingFootprintSelection, onSelect: function (id) { pendingFootprintSelection = id; redrawFootprintMapForSelection(); } } : null);
+          } else {
+            showBaselineFromLookup(lookupData);
+          }
+          showStatus('Site lookup completed successfully!', 'success');
+        } catch (error) {
+          console.error('Lookup error:', error);
+          showStatus(`Error: ${error.message}`, 'error');
+          if (locationDisplay) locationDisplay.style.display = 'none';
+          baselineSummary.style.display = 'none';
+          if (candidateSelector) candidateSelector.style.display = 'none';
+          if (baselineOverrides) baselineOverrides.style.display = 'none';
+          var advWrapErr = document.getElementById('advanced-options-wrap');
+          if (advWrapErr) advWrapErr.style.display = 'none';
+          geocodeResult = null;
+          siteLookupResult = null;
+        } finally {
+          lookupBtn.disabled = false;
+        }
+      });
+    }
 
-    confirmFootprintBtn.addEventListener('click', function () {
-      if (!siteLookupResult) return;
-      selectedBuildingId = pendingFootprintSelection != null ? pendingFootprintSelection : null;
-      footprintConfirmation.style.display = 'none';
-      showBaselineFromLookup(siteLookupResult);
-      showStatus(selectedBuildingId != null
-        ? 'Footprint locked. Building ' + selectedBuildingId + ' will be used for cost estimation and rendering.'
-        : 'Footprint confirmed. You can choose another building below if needed.', 'success');
-      setTimeout(hideStatus, 4000);
-    });
+    if (document.getElementById('confirm-footprint-btn')) {
+      document.getElementById('confirm-footprint-btn').addEventListener('click', function () {
+        if (!siteLookupResult) return;
+        selectedBuildingId = pendingFootprintSelection != null ? pendingFootprintSelection : null;
+        var fpConf = document.getElementById('footprint-confirmation');
+        if (fpConf) fpConf.style.display = 'none';
+        showBaselineFromLookup(siteLookupResult);
+        showStatus(selectedBuildingId != null
+          ? 'Footprint locked. Building ' + selectedBuildingId + ' will be used for cost estimation and rendering.'
+          : 'Footprint confirmed. You can choose another building below if needed.', 'success');
+        setTimeout(hideStatus, 4000);
+      });
+    }
 
     var advancedOptionsToggle = document.getElementById('advanced-options-toggle');
     var advancedOptionsContent = document.getElementById('advanced-options-content');
@@ -1667,9 +1655,15 @@
         payload.conceptId = conceptId;
       }
 
-      // Add selectedBuildingId if user selected a candidate
+      // Add selected footprint so renderer uses selected, not auto-detected
       if (selectedBuildingId) {
         payload.selectedBuildingId = selectedBuildingId;
+        if (siteLookupResult && siteLookupResult.candidates) {
+          const c = siteLookupResult.candidates.find(function (x) { return x.id === selectedBuildingId; });
+          if (c && c.classification != null && c.area != null && c.adjacencyCount != null) {
+            payload.existingBuilding = { classification: c.classification, footprintArea: c.area, adjacencyCount: c.adjacencyCount };
+          }
+        }
       }
 
       // Add manual overrides if provided
@@ -1696,7 +1690,7 @@
 
       // Add address/latlng for site lookup if available
       if (geocodeResult) {
-        payload.address = addressInput.value.trim();
+        payload.address = (addressInput ? addressInput.value.trim() : (geocodeResult ? geocodeResult.displayName : '')) || '';
         payload.lat = geocodeResult.lat;
         payload.lng = geocodeResult.lng;
       }
@@ -2013,7 +2007,8 @@
       submitBtn.disabled = true;
       
       // Use job-based async pattern by default (free tier compatible)
-      await handleJobBasedRender(projectId, conceptBrief, outputType);
+      const selectedOutputType = conceptBrief.proposedDesign.outputType;
+      await handleJobBasedRender(projectId, conceptBrief, selectedOutputType);
     });
 
     // Helper function: Direct render (original approach)
@@ -2036,9 +2031,15 @@
           conceptInputs: conceptBrief,
         };
 
-        // Add selectedBuildingId if user selected a candidate
+        // Add selected footprint so renderer uses selected, not auto-detected
         if (selectedBuildingId) {
           payload.selectedBuildingId = selectedBuildingId;
+          if (siteLookupResult && siteLookupResult.candidates) {
+            const c = siteLookupResult.candidates.find(function (x) { return x.id === selectedBuildingId; });
+            if (c && c.classification != null && c.area != null && c.adjacencyCount != null) {
+              payload.existingBuilding = { classification: c.classification, footprintArea: c.area, adjacencyCount: c.adjacencyCount };
+            }
+          }
         }
 
         // Add manual overrides if provided
@@ -2065,7 +2066,7 @@
 
         // Add address/latlng for site lookup if available
         if (geocodeResult) {
-          payload.address = addressInput.value.trim();
+          payload.address = (addressInput ? addressInput.value.trim() : (geocodeResult ? geocodeResult.displayName : '')) || '';
           payload.lat = geocodeResult.lat;
           payload.lng = geocodeResult.lng;
         }
@@ -2165,9 +2166,15 @@
           }
         }
 
-        // Add selectedBuildingId if user selected a candidate
+        // Add selected footprint so renderer uses selected, not auto-detected
         if (selectedBuildingId) {
           payload.selectedBuildingId = selectedBuildingId;
+          if (siteLookupResult && siteLookupResult.candidates) {
+            const c = siteLookupResult.candidates.find(function (x) { return x.id === selectedBuildingId; });
+            if (c && c.classification != null && c.area != null && c.adjacencyCount != null) {
+              payload.existingBuilding = { classification: c.classification, footprintArea: c.area, adjacencyCount: c.adjacencyCount };
+            }
+          }
         }
 
         // Add manual overrides if provided
@@ -2194,7 +2201,7 @@
 
         // Add address/latlng for site lookup if available
         if (geocodeResult) {
-          payload.address = addressInput.value.trim();
+          payload.address = (addressInput ? addressInput.value.trim() : (geocodeResult ? geocodeResult.displayName : '')) || '';
           payload.lat = geocodeResult.lat;
           payload.lng = geocodeResult.lng;
         }
@@ -2208,21 +2215,30 @@
           body: JSON.stringify(payload),
         });
 
+        // Read body once as text to avoid "stream is not readable" on .json() and support non-JSON error bodies
+        const createBodyText = await createResponse.text();
+        let jobData;
+        try {
+          jobData = createBodyText ? JSON.parse(createBodyText) : null;
+        } catch (_) {
+          jobData = null;
+        }
+
         if (!createResponse.ok) {
-          const ct = createResponse.headers.get('content-type') || '';
           let errorMsg = 'Failed to create job';
-          if (ct.includes('application/json')) {
-            try {
-              const error = await createResponse.json();
-              errorMsg = error.message || error.error || errorMsg;
-            } catch (_) {}
-          } else if (createResponse.status === 404) {
+          if (createResponse.status === 404) {
             errorMsg = 'Jobs API not found (404). Ensure /api/jobs/render is deployed.';
+          } else if (jobData && (jobData.message || jobData.error)) {
+            errorMsg = jobData.message || jobData.error;
+          } else if (createBodyText) {
+            errorMsg = createBodyText.slice(0, 200);
           }
           throw new Error(errorMsg);
         }
 
-        const jobData = await createResponse.json();
+        if (!jobData || !jobData.jobId) {
+          throw new Error('Invalid job response: missing jobId');
+        }
         const { jobId, conceptId: finalConceptId } = jobData;
 
         showStatus('Generating concept', 'info');

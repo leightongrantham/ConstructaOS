@@ -3,6 +3,7 @@
  */
 
 import express, { type Request, type Response, type NextFunction } from 'express';
+import 'express-async-errors'; // Ensures async route rejections are passed to error handler (so we always return JSON, not Vercel's "An error occurred...")
 import cors from 'cors';
 import { fileURLToPath } from 'url';
 import { dirname, join, resolve } from 'path';
@@ -14,17 +15,18 @@ import { buildSiteEnvelope } from './services/buildSiteEnvelope.js';
 import { buildSiteContextSummary } from './services/buildSiteContextSummary.js';
 import { queryNearbyBuildings } from './services/queryNearbyBuildings.js';
 import { inferExistingContextFromOSM } from './services/inferExistingContextFromOSM.js';
-import { generateConceptSeed } from './services/generateConceptSeed.js';
+import { generateConceptSeed, validateAndNormalizeSeed } from './services/generateConceptSeed.js';
 import { storeConceptSeed, getConceptSeed, storeRenderedImage, loadConceptSeed, saveConceptSeed, loadRenderedImage, getRenderedImageUrl, LOCAL_STORAGE_DIR } from './utils/conceptStorage.js';
 import { lookupSiteBaselineFull } from './services/site/lookupSiteBaseline.js';
 import { runSiteLookup } from './services/site/runSiteLookup.js';
 import type { ConceptInputs, ConceptBrief } from './types/conceptInputs.js';
 import type { ExistingBaseline } from './services/site/inferExistingBaseline.js';
 import { legacyInputsToConceptBrief } from './types/conceptInputs.js';
-import type { RenderType, RenderResponse, SiteInput } from './types/render.js';
+import type { RenderType, RenderResponse, SiteInput, ExistingBuildingPayload } from './types/render.js';
 import type { RenderJob, JobCreateRequest, JobStatusResponse } from './types/job.js';
 import { storeJob, getJob } from './utils/jobStorage.js';
-import type { StoreyCount } from './services/generateConceptSeed.js';
+import { extractSupabaseConfig, resolveSupabaseConfig } from './utils/supabaseConfig.js';
+import type { ConceptSeed as ConceptSeedType, StoreyCount } from './services/generateConceptSeed.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -35,8 +37,17 @@ type SiteParams = {
   lat?: number;
   lng?: number;
   baselineId?: number;
+  /** Selected footprint from client; when set, renderer uses this instead of auto-detected primary. */
+  existingBuilding?: ExistingBuildingPayload;
   baselineOverride?: { buildingForm?: string; storeys?: string; roofAssumption?: string; footprintScale?: string };
 };
+
+/** If job.imageUrl is a relative /storage/ path, rewrite to absolute URL so cross-origin clients can load the image. */
+function jobWithAbsoluteImageUrl(job: RenderJob, req: Request): RenderJob {
+  if (!job.imageUrl?.startsWith('/storage/')) return job;
+  const base = `${req.protocol}://${req.get('host') || req.hostname}`;
+  return { ...job, imageUrl: `${base}${job.imageUrl}` };
+}
 
 /** Normalize site params from req.body: prefer site object, fall back to flat address/lat/lng/baseline fields. */
 function getSiteParams(body: Record<string, unknown>): SiteParams {
@@ -54,6 +65,7 @@ function getSiteParams(body: Record<string, unknown>): SiteParams {
     }
     const out: SiteParams = { hasSite: true, lat: site.lat, lng: site.lng };
     if (baselineId != null && !Number.isNaN(baselineId)) out.baselineId = baselineId;
+    if (site.existingBuilding) out.existingBuilding = site.existingBuilding;
     if (baselineOverride) out.baselineOverride = baselineOverride;
     return out;
   }
@@ -62,6 +74,7 @@ function getSiteParams(body: Record<string, unknown>): SiteParams {
   const lng = body.lng as number | undefined;
   const hasSite = !!(address || (typeof lat === 'number' && typeof lng === 'number'));
   const selectedBuildingId = body.selectedBuildingId as number | undefined;
+  const existingBuilding = body.existingBuilding as ExistingBuildingPayload | undefined;
   const baselineOverrides = body.baselineOverrides as
     | { buildingForm?: string; storeys?: string; roofAssumption?: string; footprintScale?: string }
     | undefined;
@@ -70,8 +83,36 @@ function getSiteParams(body: Record<string, unknown>): SiteParams {
   if (lat !== undefined) out.lat = lat;
   if (lng !== undefined) out.lng = lng;
   if (selectedBuildingId !== undefined) out.baselineId = selectedBuildingId;
+  if (existingBuilding) out.existingBuilding = existingBuilding;
   if (baselineOverrides) out.baselineOverride = baselineOverrides;
   return out;
+}
+
+/** Map client classification to ExistingBaseline.buildingForm. */
+function existingBuildingForm(
+  classification: ExistingBuildingPayload['classification']
+): ExistingBaseline['buildingForm'] {
+  switch (classification) {
+    case 'detached': return 'Detached';
+    case 'semi': return 'Semi-detached';
+    case 'terrace': return 'Terraced';
+    default: return 'Unknown';
+  }
+}
+
+/** Apply client-provided existingBuilding (selected footprint) to baseline so renderer uses selected, not auto-detected. */
+function applyExistingBuildingToBaseline(
+  baseline: ExistingBaseline | null,
+  existingBuilding: ExistingBuildingPayload
+): ExistingBaseline | null {
+  const form = existingBuildingForm(existingBuilding.classification);
+  if (baseline) {
+    baseline.buildingForm = form;
+    baseline.footprintAreaM2 = existingBuilding.footprintArea;
+    baseline.rationale.push(`Selected footprint: ${form}, ${Math.round(existingBuilding.footprintArea)} m², ${existingBuilding.adjacencyCount} adjacent`);
+    return baseline;
+  }
+  return null;
 }
 
 /** Resolve seed storeys from single source: new build = brief; extension/renovation = baseline. */
@@ -200,7 +241,25 @@ export function createServer(): express.Application {
   app.use(cors(corsOptions));
 
   // Middleware
-  app.use(express.json());
+  // Skip body parsing when body already set (e.g. delegated from root or Vercel) to avoid "stream is not readable"
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    if (req.body !== undefined && req.body !== null) return next();
+    express.json({ limit: '10mb' })(req, res, next);
+  });
+
+  // Body parser errors (e.g. invalid JSON) must return JSON so client never sees "Unexpected token" or plain-text errors
+  app.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
+    if (res.headersSent) return next(err);
+    const isSyntaxError = err instanceof SyntaxError || (err && typeof err === 'object' && 'body' in err);
+    if (isSyntaxError) {
+      res.status(400).json({
+        error: 'Invalid request body',
+        message: err instanceof Error ? err.message : 'Malformed JSON or body too large',
+      });
+      return;
+    }
+    next(err);
+  });
 
   // Health check endpoint
   app.get('/health', (_req: Request, res: Response) => {
@@ -208,24 +267,70 @@ export function createServer(): express.Application {
   });
 
   /**
+   * GET /api/health/keys - Key presence and optional validation (no key values returned).
+   * ?validate=1 runs a minimal OpenAI call to confirm the key works.
+   * (Also mounted at /health/keys for when Vercel strips /api prefix.)
+   */
+  const healthKeysHandler = async (req: Request, res: Response) => {
+    const openaiSet = Boolean(process.env.OPENAI_API_KEY?.trim());
+    const gatewaySet = Boolean(process.env.AI_GATEWAY_API_KEY?.trim());
+    const imageReady = openaiSet || gatewaySet;
+
+    const out: Record<string, unknown> = {
+      keys: {
+        openai: { set: openaiSet },
+        gateway: { set: gatewaySet },
+        imageReady,
+      },
+    };
+
+    if (req.query.validate === '1' || req.query.validate === 'true') {
+      if (!imageReady) {
+        res.status(200).json({ ...out, validated: false, error: 'No API key set (OPENAI_API_KEY or AI_GATEWAY_API_KEY)' });
+        return;
+      }
+      try {
+        const { chatClient, chatModel } = await import('./utils/openaiClient.js');
+        const start = Date.now();
+        await chatClient.responses.create({
+          model: chatModel('gpt-4o-mini'),
+          input: 'Reply with exactly: OK',
+          max_output_tokens: 10,
+        });
+        (out as Record<string, unknown>).validated = true;
+        (out as Record<string, unknown>).valid = true;
+        (out as Record<string, unknown>).durationMs = Date.now() - start;
+      } catch (err) {
+        (out as Record<string, unknown>).validated = true;
+        (out as Record<string, unknown>).valid = false;
+        (out as Record<string, unknown>).error = err instanceof Error ? err.message : String(err);
+      }
+    }
+
+    res.status(200).json(out);
+  };
+  app.get('/api/health/keys', healthKeysHandler);
+  app.get('/health/keys', healthKeysHandler);
+
+  /**
    * GET /test/openai - OpenAI connectivity test (diagnostic for connection errors)
-   * Tests chat (gateway or direct) and optionally image API.
+   * Tests chat (gateway or direct). Accepts either OPENAI_API_KEY or AI_GATEWAY_API_KEY.
    */
   app.get('/test/openai', async (_req: Request, res: Response) => {
     const results: Record<string, { ok: boolean; duration?: number; error?: string }> = {};
-    const hasGateway = !!process.env.AI_GATEWAY_API_KEY;
-    const hasOpenAI = !!process.env.OPENAI_API_KEY;
+    const hasGateway = Boolean(process.env.AI_GATEWAY_API_KEY?.trim());
+    const hasOpenAI = Boolean(process.env.OPENAI_API_KEY?.trim());
+    const hasAnyKey = hasOpenAI || hasGateway;
 
-    if (!hasOpenAI) {
+    if (!hasAnyKey) {
       res.status(500).json({
-        error: 'OPENAI_API_KEY not set',
+        error: 'Neither OPENAI_API_KEY nor AI_GATEWAY_API_KEY is set',
         results: { env: { hasGateway, hasOpenAI } },
       });
       return;
     }
 
     try {
-      // Test 1: Chat completion (uses gateway if AI_GATEWAY_API_KEY set)
       const chatStart = Date.now();
       const { chatClient, chatModel } = await import('./utils/openaiClient.js');
       const chatRes = await chatClient.responses.create({
@@ -264,6 +369,8 @@ export function createServer(): express.Application {
     async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       try {
         const { projectId, renderType, conceptInputs, conceptId } = req.body as JobCreateRequest & { conceptInputs: any };
+        const sbClientConfig = extractSupabaseConfig(req.body);
+        const sb = resolveSupabaseConfig(sbClientConfig);
 
         // Validate required fields
         if (!projectId || !renderType || !conceptInputs) {
@@ -281,23 +388,39 @@ export function createServer(): express.Application {
           return;
         }
 
+        // Align renderType with conceptInputs.outputType so job is created with correct type (e.g. isometric cutaway when client sends outputType 'concept_plan' but renderType 'axonometric')
+        const requestedOutputType =
+          (conceptInputs && typeof conceptInputs === 'object' && (conceptInputs as any).proposedDesign?.outputType) ||
+          (conceptInputs && typeof conceptInputs === 'object' && (conceptInputs as any).outputType);
+        let effectiveRenderType: RenderType = renderType as RenderType;
+        if (requestedOutputType === 'concept_plan' && renderType !== 'floor_plan') {
+          effectiveRenderType = 'floor_plan';
+          console.log('[jobs/render] Using renderType=floor_plan from conceptInputs.outputType (concept_plan)');
+        } else if (requestedOutputType === 'concept_section' && renderType !== 'section') {
+          effectiveRenderType = 'section';
+          console.log('[jobs/render] Using renderType=section from conceptInputs.outputType (concept_section)');
+        } else if (requestedOutputType === 'concept_axonometric' && renderType !== 'axonometric') {
+          effectiveRenderType = 'axonometric';
+          console.log('[jobs/render] Using renderType=axonometric from conceptInputs.outputType (concept_axonometric)');
+        }
+
         // Generate job ID and concept ID
         const jobId = randomUUID();
         const finalConceptId = conceptId || randomUUID();
 
-        // Create job record
+        // Create job record (use effectiveRenderType so process uses correct prompt and response)
         const job: RenderJob = {
           jobId,
           projectId,
           conceptId: finalConceptId,
-          renderType: renderType as RenderType,
+          renderType: effectiveRenderType,
           status: 'pending',
           progress: 0,
           createdAt: new Date().toISOString(),
         };
 
         // Store job (fast operation, <1s)
-        await storeJob(job);
+        await storeJob(job, sb);
 
         // Return immediately with jobId
         res.json({
@@ -323,7 +446,12 @@ export function createServer(): express.Application {
     async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       try {
         const { jobId } = req.params;
-        const { projectId } = req.query;
+        const { projectId, supabaseUrl, supabaseKey, supabaseBucket } = req.query;
+        const sb = resolveSupabaseConfig({
+          supabaseUrl: typeof supabaseUrl === 'string' ? supabaseUrl : undefined,
+          supabaseKey: typeof supabaseKey === 'string' ? supabaseKey : undefined,
+          supabaseBucket: typeof supabaseBucket === 'string' ? supabaseBucket : undefined,
+        });
 
         if (!jobId || typeof jobId !== 'string') {
           res.status(400).json({
@@ -339,7 +467,7 @@ export function createServer(): express.Application {
           return;
         }
 
-        const job = await getJob(projectId, jobId);
+        const job = await getJob(projectId, jobId, sb);
 
         if (!job) {
           res.status(404).json({
@@ -349,7 +477,7 @@ export function createServer(): express.Application {
           return;
         }
 
-        const response: JobStatusResponse = { job };
+        const response: JobStatusResponse = { job: jobWithAbsoluteImageUrl(job, req) };
         res.json(response);
       } catch (error) {
         next(error);
@@ -371,6 +499,8 @@ export function createServer(): express.Application {
       try {
         const { jobId } = req.params;
         const { projectId, conceptInputs } = req.body;
+        const sbClientConfig = extractSupabaseConfig(req.body);
+        const sb = resolveSupabaseConfig(sbClientConfig);
 
         if (!jobId || typeof jobId !== 'string') {
           res.status(400).json({
@@ -387,7 +517,7 @@ export function createServer(): express.Application {
         }
 
         // Load job
-        let job = await getJob(projectId, jobId);
+        let job = await getJob(projectId, jobId, sb);
         if (!job) {
           res.status(404).json({
             error: 'Job not found',
@@ -398,7 +528,7 @@ export function createServer(): express.Application {
 
         // Check if already completed
         if (job.status === 'completed') {
-          res.json({ job, message: 'Job already completed' });
+          res.json({ job: jobWithAbsoluteImageUrl(job, req), message: 'Job already completed' });
           return;
         }
 
@@ -406,10 +536,17 @@ export function createServer(): express.Application {
         job.status = 'processing';
         job.startedAt = new Date().toISOString();
         job.progress = 10;
-        await storeJob(job);
+        await storeJob(job, sb);
 
         // Parse concept inputs
         let conceptBrief: ConceptBrief;
+        if (conceptInputs == null || typeof conceptInputs !== 'object') {
+          job.status = 'failed';
+          job.error = 'conceptInputs is required and must be an object';
+          await storeJob(job, sb);
+          res.status(400).json({ job });
+          return;
+        }
         if ('proposedDesign' in conceptInputs) {
           conceptBrief = conceptInputs as ConceptBrief;
         } else if (isValidConceptInputs(conceptInputs)) {
@@ -417,7 +554,7 @@ export function createServer(): express.Application {
         } else {
           job.status = 'failed';
           job.error = 'Invalid conceptInputs';
-          await storeJob(job);
+          await storeJob(job, sb);
           res.status(400).json({ job });
           return;
         }
@@ -427,102 +564,193 @@ export function createServer(): express.Application {
           conceptBrief.conceptRange = 'Grounded';
         }
 
+        // Align effective renderType with conceptBrief.proposedDesign.outputType when they conflict (same as sync /api/render)
+        let effectiveRenderType: RenderType = job.renderType;
+        const requestedOutputType = conceptBrief.proposedDesign?.outputType;
+        if (requestedOutputType === 'concept_plan' && job.renderType !== 'floor_plan') {
+          effectiveRenderType = 'floor_plan';
+          console.log('[jobs/process] Using renderType=floor_plan from conceptInputs.outputType (concept_plan)');
+        } else if (requestedOutputType === 'concept_section' && job.renderType !== 'section') {
+          effectiveRenderType = 'section';
+          console.log('[jobs/process] Using renderType=section from conceptInputs.outputType (concept_section)');
+        } else if (requestedOutputType === 'concept_axonometric' && job.renderType !== 'axonometric') {
+          effectiveRenderType = 'axonometric';
+          console.log('[jobs/process] Using renderType=axonometric from conceptInputs.outputType (concept_axonometric)');
+        }
+
         // Map renderType to outputType
         const outputTypeMap = {
           'axonometric': 'concept_axonometric',
           'floor_plan': 'concept_plan',
           'section': 'concept_section',
         } as const;
-        conceptBrief.proposedDesign.outputType = outputTypeMap[job.renderType];
+        conceptBrief.proposedDesign.outputType = outputTypeMap[effectiveRenderType];
 
-        // Load or generate seed
+        // Resolve baseline from site (same as sync /api/render) so Lovable can send address/lat/lng and get same prompt context
+        const siteParams = getSiteParams(req.body);
+        let resolvedBaseline: ExistingBaseline | null = null;
+        try {
+          resolvedBaseline = await resolveBaselineIfSite(siteParams);
+          if (resolvedBaseline) {
+            console.log(`[jobs/process] Resolved existingBaseline (confidence: ${resolvedBaseline.confidence})`);
+          }
+          if (siteParams.existingBuilding) {
+            resolvedBaseline = applyExistingBuildingToBaseline(resolvedBaseline, siteParams.existingBuilding);
+            if (resolvedBaseline) {
+              console.log(`[jobs/process] Applied selected footprint: ${siteParams.existingBuilding.classification}, ${siteParams.existingBuilding.footprintArea} m²`);
+            }
+          }
+        } catch (err) {
+          console.error('[jobs/process] Baseline resolution failed:', err);
+        }
+
+        // Load or generate seed (with baseline so prompt matches sync renderer). Prefer client-supplied seed (e.g. from Lovable).
         job.progress = 30;
-        await storeJob(job);
+        await storeJob(job, sb);
 
-        let conceptSeed = await loadConceptSeed(projectId, job.conceptId);
+        const jobClientSeed = req.body?.conceptSeed;
+        const jobHasValidClientSeed =
+          jobClientSeed &&
+          typeof jobClientSeed === 'object' &&
+          typeof (jobClientSeed as Record<string, unknown>).footprintShape === 'string' &&
+          typeof (jobClientSeed as Record<string, unknown>).storeys === 'string' &&
+          typeof (jobClientSeed as Record<string, unknown>).roof === 'string';
+
+        let conceptSeed: ConceptSeedType | null = jobHasValidClientSeed ? validateAndNormalizeSeed(jobClientSeed) : null;
+        if (conceptSeed && jobHasValidClientSeed) {
+          console.log(`[jobs/process] Using client-supplied concept seed for ${projectId}/${job.conceptId}`);
+          conceptBrief.conceptRange = conceptSeed.conceptRange;
+        }
+        if (!conceptSeed) {
+          conceptSeed = await loadConceptSeed(projectId, job.conceptId, sb);
+        }
         if (conceptSeed) {
           conceptBrief.conceptRange = conceptSeed.conceptRange;
+          if (conceptSeed.existingBaseline === undefined && resolvedBaseline) {
+            conceptSeed.existingBaseline = resolvedBaseline;
+            conceptSeed.storeys = resolveSeedStoreys(conceptBrief, resolvedBaseline);
+            await saveConceptSeed(projectId, job.conceptId, conceptSeed, sb);
+          }
         } else {
-          conceptSeed = await generateConceptSeed(conceptBrief);
-          await saveConceptSeed(projectId, job.conceptId, conceptSeed);
+          conceptSeed = await generateConceptSeed(conceptBrief, resolvedBaseline ? { existingBaseline: resolvedBaseline } : undefined);
+          if (resolvedBaseline) {
+            conceptSeed.existingBaseline = resolvedBaseline;
+            conceptSeed.storeys = resolveSeedStoreys(conceptBrief, resolvedBaseline);
+          } else if (conceptBrief.proposedDesign.projectType !== 'new_build') {
+            conceptSeed.storeys = resolveSeedStoreys(conceptBrief, null);
+          }
+          await saveConceptSeed(projectId, job.conceptId, conceptSeed, sb);
         }
 
         // Build prompt
         job.progress = 50;
-        await storeJob(job);
+        await storeJob(job, sb);
 
         const requiresExistingConcept = job.renderType === 'floor_plan' || job.renderType === 'section';
+        let referenceAxonBuffer: Buffer | undefined;
         let referenceImageUrl: string | undefined;
 
         if (requiresExistingConcept) {
-          // Check if axonometric image exists (optional - proceed without it if missing)
-          const axonBuffer = await loadRenderedImage(projectId, job.conceptId, 'axonometric');
+          const axonBuffer = await loadRenderedImage(projectId, job.conceptId, 'axonometric', sb);
           if (axonBuffer) {
-            // Axon image exists - use it as reference for style consistency
-            referenceImageUrl = getRenderedImageUrl(projectId, job.conceptId, 'axonometric') || undefined;
-            if (referenceImageUrl) {
-              console.log(`Using axonometric reference for ${job.renderType} render: ${referenceImageUrl}`);
-            }
+            referenceAxonBuffer = axonBuffer;
+            console.log(`Using axonometric reference for ${job.renderType} (buffer from storage)`);
           } else {
-            // Axon image not found - proceed without reference (standalone generation)
-            console.log(`No axonometric reference found for ${job.renderType} render - generating standalone`);
+            // Client can pass reference (same as sync) so Lovable can supply axon from another source
+            const refUrl = req.body?.referenceAxonUrl;
+            const refB64 = req.body?.referenceAxonBase64;
+            if (typeof refUrl === 'string' && refUrl.trim()) {
+              referenceImageUrl = refUrl.trim();
+              console.log(`Using axonometric reference for ${job.renderType} (client referenceAxonUrl)`);
+            } else if (typeof refB64 === 'string' && refB64.trim()) {
+              try {
+                referenceAxonBuffer = Buffer.from(refB64.trim(), 'base64');
+                if (referenceAxonBuffer.length > 0) {
+                  console.log(`Using axonometric reference for ${job.renderType} (client referenceAxonBase64, ${referenceAxonBuffer.length} bytes)`);
+                } else referenceAxonBuffer = undefined;
+              } catch {
+                referenceAxonBuffer = undefined;
+              }
+            }
+            if (!referenceAxonBuffer && !referenceImageUrl) {
+              const url = getRenderedImageUrl(projectId, job.conceptId, 'axonometric', sb) || undefined;
+              if (url && !url.startsWith('/')) {
+                referenceImageUrl = url;
+                console.log(`Using axonometric reference for ${job.renderType} render: ${referenceImageUrl}`);
+              } else {
+                console.log(`No axonometric reference found for ${job.renderType} render - generating standalone`);
+              }
+            }
           }
         }
 
-        const promptResult = buildConceptPrompt(conceptBrief, {
+        const promptOptions: Parameters<typeof buildConceptPrompt>[1] = {
           conceptSeed,
-          hasReferenceAxon: !!referenceImageUrl,
-        });
+          hasReferenceAxon: !!(referenceAxonBuffer?.length || referenceImageUrl),
+        };
+        if (job.renderType === 'floor_plan' && typeof req.body?.includePeopleInPlan === 'boolean') {
+          promptOptions.includePeopleInPlan = req.body.includePeopleInPlan;
+        }
+        if (job.renderType === 'section' && typeof req.body?.includePeopleInSection === 'boolean') {
+          promptOptions.includePeopleInSection = req.body.includePeopleInSection;
+        }
+        if (siteParams.baselineOverride?.footprintScale) {
+          promptOptions.baselineFootprintScaleOverride = siteParams.baselineOverride.footprintScale;
+        }
+        const promptResult = buildConceptPrompt(conceptBrief, promptOptions);
 
         // Generate image
         job.progress = 70;
-        await storeJob(job);
+        await storeJob(job, sb);
 
         const result = await generateConceptImage(
           Buffer.alloc(0),
-          job.renderType,
+          effectiveRenderType,
           undefined,
           promptResult.prompt,
-          undefined,
+          referenceAxonBuffer ?? undefined,
           referenceImageUrl,
           job.conceptId
         );
 
         // Store rendered image
         job.progress = 90;
-        await storeJob(job);
+        await storeJob(job, sb);
 
         const imageUrl = await storeRenderedImage(
           projectId,
           job.conceptId,
-          job.renderType,
-          result.imageBase64
+          effectiveRenderType,
+          result.imageBase64,
+          sb
         );
 
-        // Mark job as completed
+        // Mark job as completed (use effectiveRenderType so stored job and response show what was actually rendered)
         job.status = 'completed';
         job.progress = 100;
         job.completedAt = new Date().toISOString();
         job.imageUrl = imageUrl;
+        job.renderType = effectiveRenderType;
         job.promptVersion = promptResult.promptVersion;
         job.conceptRange = conceptBrief.conceptRange;
-        await storeJob(job);
+        await storeJob(job, sb);
 
         console.log(`✅ Job ${jobId} completed successfully`);
-        res.json({ job });
+        res.json({ job: jobWithAbsoluteImageUrl(job, req) });
       } catch (error) {
         // Mark job as failed
         const { jobId } = req.params;
         const { projectId } = req.body;
+        const sbErr = resolveSupabaseConfig(extractSupabaseConfig(req.body));
         
         if (projectId && typeof projectId === 'string' && jobId && typeof jobId === 'string') {
           try {
-            const job = await getJob(projectId, jobId);
+            const job = await getJob(projectId, jobId, sbErr);
             if (job) {
               job.status = 'failed';
               job.error = error instanceof Error ? error.message : 'Unknown error';
               job.completedAt = new Date().toISOString();
-              await storeJob(job);
+              await storeJob(job, sbErr);
             }
           } catch (storeError) {
             console.error('Failed to update job status:', storeError);
@@ -622,13 +850,30 @@ export function createServer(): express.Application {
           res.status(400).json({ error: message });
           return;
         }
-        if (message.includes('Address not found')) {
+        if (message.includes('Address not found') || message.includes('no results')) {
           res.status(404).json({ error: message });
+          return;
+        }
+        if (message.includes('timeout') || message.includes('timed out') || message.includes('Geocoding')) {
+          res.status(504).json({ error: message });
           return;
         }
         console.error('Site-lookup endpoint error:', error);
         if (!res.headersSent) {
-          res.status(500).json({ error: 'Internal server error', message });
+          const lower = message.toLowerCase();
+          const isOverpassTimeout =
+            lower === 'map_service_timeout' ||
+            lower.includes('504') ||
+            lower.includes('503') ||
+            lower.includes('gateway timeout') ||
+            lower.includes('overpass') ||
+            lower.includes('failed to query nearby');
+          res.status(500).json({
+            error: 'Internal server error',
+            message: isOverpassTimeout
+              ? 'Map data service is temporarily unavailable (timeout). Please try again in a moment.'
+              : message,
+          });
         }
       }
     }
@@ -674,6 +919,13 @@ export function createServer(): express.Application {
         if (typeof lat !== 'number' || typeof lng !== 'number') {
           res.status(400).json({
             error: 'lat and lng are required and must be numbers',
+          });
+          return;
+        }
+
+        if (conceptInputs == null || typeof conceptInputs !== 'object') {
+          res.status(400).json({
+            error: 'conceptInputs is required and must be a valid ConceptInputs or ConceptBrief object',
           });
           return;
         }
@@ -743,18 +995,25 @@ export function createServer(): express.Application {
       const VERCEL_FREE_TIMEOUT = 10000; // 10 seconds for free tier
       const TIMEOUT_WARNING_THRESHOLD = 8000; // Warn if approaching timeout
 
-      // Early check: OPENAI_API_KEY required for image generation
-      if (!process.env.OPENAI_API_KEY?.trim()) {
+      // Early check: need either OPENAI_API_KEY (direct) or AI_GATEWAY_API_KEY (gateway + BYOK) for image generation
+      const hasOpenAI = Boolean(process.env.OPENAI_API_KEY?.trim());
+      const hasGateway = Boolean(process.env.AI_GATEWAY_API_KEY?.trim());
+      if (!hasOpenAI && !hasGateway) {
         res.status(503).json({
           error: 'SERVICE_UNAVAILABLE',
-          message: 'OPENAI_API_KEY is not configured. Add it in Vercel: Project Settings → Environment Variables → Production.',
-          hint: 'Image generation requires a valid OpenAI API key. Set OPENAI_API_KEY for the Production environment.',
+          message: 'No API key configured. Set OPENAI_API_KEY (direct) or AI_GATEWAY_API_KEY (Vercel gateway + BYOK) in Vercel → Environment Variables.',
+          hint: 'For Vercel, use AI_GATEWAY_API_KEY and add your OpenAI key in AI Gateway → Bring Your Own Key.',
+          keys: { openai: hasOpenAI, gateway: hasGateway },
         });
         return;
       }
 
       try {
-        const { projectId: rawProjectId, renderType, conceptId, conceptInputs, includePeopleInPlan, includePeopleInSection } = req.body;
+        let { projectId: rawProjectId, renderType, conceptId, conceptInputs, includePeopleInPlan, includePeopleInSection } = req.body;
+
+        // Resolve Supabase config from request body (Lovable sends its own creds) or env vars
+        const sbClientConfig = extractSupabaseConfig(req.body);
+        const sb = resolveSupabaseConfig(sbClientConfig);
 
         // projectId optional - default to "default" for storage organization
         const projectId = (rawProjectId && typeof rawProjectId === 'string') ? rawProjectId : 'default';
@@ -775,12 +1034,11 @@ export function createServer(): express.Application {
           return;
         }
 
-        // For plan/section, conceptId is optional - if not provided, generate new one
-        // This allows generating floor_plan/section without existing seed/axon
+        // Iso (floor_plan/section) can be generated independently: omit conceptId to create new concept + seed and render without any prior axon.
         const requiresExistingConcept = renderType === 'floor_plan' || renderType === 'section';
 
         // Validate conceptInputs (required for seed generation)
-        if (!conceptInputs) {
+        if (conceptInputs == null || typeof conceptInputs !== 'object') {
           res.status(400).json({
             error: 'conceptInputs is required (ConceptBrief or ConceptInputs)',
           });
@@ -811,6 +1069,19 @@ export function createServer(): express.Application {
           conceptBrief.conceptRange = 'Grounded';
         }
 
+        // Align renderType with conceptBrief.proposedDesign.outputType when they conflict (e.g. Lovable sends outputType 'concept_plan' but renderType 'axonometric')
+        const requestedOutputType = conceptBrief.proposedDesign?.outputType;
+        if (requestedOutputType === 'concept_plan' && renderType !== 'floor_plan') {
+          renderType = 'floor_plan';
+          console.log('[RENDER] Using renderType=floor_plan from conceptInputs.outputType (concept_plan)');
+        } else if (requestedOutputType === 'concept_section' && renderType !== 'section') {
+          renderType = 'section';
+          console.log('[RENDER] Using renderType=section from conceptInputs.outputType (concept_section)');
+        } else if (requestedOutputType === 'concept_axonometric' && renderType !== 'axonometric') {
+          renderType = 'axonometric';
+          console.log('[RENDER] Using renderType=axonometric from conceptInputs.outputType (concept_axonometric)');
+        }
+
         // Map renderType to outputType for conceptBrief
         const outputTypeMap = {
           'axonometric': 'concept_axonometric',
@@ -830,13 +1101,39 @@ export function createServer(): express.Application {
           if (resolvedBaseline) {
             console.log(`Resolved existingBaseline for ${projectId}/${finalConceptId} (confidence: ${resolvedBaseline.confidence})`);
           }
+          // When client sends existingBuilding (selected footprint), use it so renderer uses selected not auto-detected
+          if (siteParams.existingBuilding) {
+            resolvedBaseline = applyExistingBuildingToBaseline(resolvedBaseline, siteParams.existingBuilding);
+            if (resolvedBaseline) {
+              console.log(`Applied selected footprint: ${siteParams.existingBuilding.classification}, ${siteParams.existingBuilding.footprintArea} m²`);
+            }
+          }
         } catch (err) {
           console.error('Baseline resolution failed:', err);
         }
 
-        // SEED PIPELINE: Load or generate concept seed
-        let conceptSeed = await loadConceptSeed(projectId, finalConceptId);
-        
+        // SEED PIPELINE: Use client-supplied seed (Lovable), load from storage, or generate
+        const clientSeed = req.body?.conceptSeed;
+        const hasValidClientSeed =
+          clientSeed &&
+          typeof clientSeed === 'object' &&
+          typeof (clientSeed as Record<string, unknown>).footprintShape === 'string' &&
+          typeof (clientSeed as Record<string, unknown>).storeys === 'string' &&
+          typeof (clientSeed as Record<string, unknown>).roof === 'string';
+
+        let conceptSeed: ConceptSeedType | null = hasValidClientSeed
+          ? validateAndNormalizeSeed(clientSeed)
+          : null;
+
+        if (conceptSeed && hasValidClientSeed) {
+          console.log(`Using client-supplied concept seed for ${projectId}/${finalConceptId}`);
+          conceptBrief.conceptRange = conceptSeed.conceptRange;
+        }
+
+        if (!conceptSeed) {
+          conceptSeed = await loadConceptSeed(projectId, finalConceptId, sb);
+        }
+
         if (conceptSeed) {
           // Use existing seed
           console.log(`Using existing concept seed for ${projectId}/${finalConceptId}`);
@@ -849,7 +1146,7 @@ export function createServer(): express.Application {
           if (conceptSeed.existingBaseline === undefined && resolvedBaseline) {
             conceptSeed.existingBaseline = resolvedBaseline;
             conceptSeed.storeys = resolveSeedStoreys(conceptBrief, resolvedBaseline);
-            await saveConceptSeed(projectId, finalConceptId, conceptSeed);
+            await saveConceptSeed(projectId, finalConceptId, conceptSeed, sb);
             console.log(`existingBaseline and storeys set for ${projectId}/${finalConceptId}`);
           }
         } else {
@@ -866,7 +1163,7 @@ export function createServer(): express.Application {
           } else if (conceptBrief.proposedDesign.projectType !== 'new_build') {
             conceptSeed.storeys = resolveSeedStoreys(conceptBrief, null);
           }
-          await saveConceptSeed(projectId, finalConceptId, conceptSeed);
+          await saveConceptSeed(projectId, finalConceptId, conceptSeed, sb);
         }
 
         // Ensure conceptSeed is defined (TypeScript guard + runtime safety)
@@ -874,32 +1171,54 @@ export function createServer(): express.Application {
           throw new Error('Failed to load or generate concept seed');
         }
 
-        // AXON REFERENCE CHECK: For floor_plan or section, check if axon image exists (optional)
-        // If it exists, use it as a reference for style consistency. If not, proceed without it.
+        // AXON REFERENCE: For floor_plan or section, use axon image so prompt and style match test harness.
+        // 1) Prefer buffer from storage (same as test harness); 2) else client-supplied referenceAxonUrl/referenceAxonBase64; 3) else URL from storage (Supabase).
+        let referenceAxonBuffer: Buffer | undefined;
         let referenceImageUrl: string | undefined;
-        
+
         if (requiresExistingConcept) {
-          // Check if axonometric image exists by trying to load it
-          const axonBuffer = await loadRenderedImage(projectId, finalConceptId, 'axonometric');
-          
+          const axonBuffer = await loadRenderedImage(projectId, finalConceptId, 'axonometric', sb);
           if (axonBuffer) {
-            // Axon image exists - use it as reference for style consistency
-            referenceImageUrl = getRenderedImageUrl(projectId, finalConceptId, 'axonometric') || undefined;
-            
-            if (referenceImageUrl) {
-              console.log(`Using axonometric reference for ${renderType} render: ${referenceImageUrl}`);
-            }
+            referenceAxonBuffer = axonBuffer;
+            console.log(`Using axonometric reference for ${renderType} (buffer from storage)`);
           } else {
-            // Axon image not found - proceed without reference (standalone generation)
-            console.log(`No axonometric reference found for ${renderType} render - generating standalone`);
+            // Cross-instance (e.g. Vercel) or not stored: allow client to supply reference
+            const refUrl = req.body?.referenceAxonUrl;
+            const refB64 = req.body?.referenceAxonBase64;
+            if (typeof refUrl === 'string' && refUrl.trim()) {
+              referenceImageUrl = refUrl.trim();
+              console.log(`Using axonometric reference for ${renderType} (client referenceAxonUrl)`);
+            } else if (typeof refB64 === 'string' && refB64.trim()) {
+              try {
+                referenceAxonBuffer = Buffer.from(refB64.trim(), 'base64');
+                if (referenceAxonBuffer.length > 0) {
+                  console.log(`Using axonometric reference for ${renderType} (client referenceAxonBase64, ${referenceAxonBuffer.length} bytes)`);
+                } else {
+                  referenceAxonBuffer = undefined;
+                }
+              } catch {
+                referenceAxonBuffer = undefined;
+              }
+            }
+            if (!referenceAxonBuffer && !referenceImageUrl) {
+              const url = getRenderedImageUrl(projectId, finalConceptId, 'axonometric', sb) || undefined;
+              if (url && !url.startsWith('/')) {
+                referenceImageUrl = url;
+                console.log(`Using axonometric reference for ${renderType} (storage URL)`);
+              } else {
+                console.log(`No axonometric reference found for ${renderType} render - generating standalone`);
+              }
+            }
           }
         }
+
+        const hasReferenceAxon = !!(referenceAxonBuffer?.length || referenceImageUrl);
 
         // Build prompt with concept seed and reference axon flag
         // Include people options for plan/section views; footprint scale override for massing hint only
         const promptOptions: Parameters<typeof buildConceptPrompt>[1] = {
           conceptSeed,
-          hasReferenceAxon: !!referenceImageUrl,
+          hasReferenceAxon,
         };
         
         if (renderType === 'floor_plan' && typeof includePeopleInPlan === 'boolean') {
@@ -947,16 +1266,16 @@ export function createServer(): express.Application {
             renderType as RenderType,
             undefined, // No user request
             promptResult.prompt,    // Use prompt with concept seed
-            undefined, // No buffer needed
-            referenceImageUrl, // Pass reference image URL for plan/section
+            referenceAxonBuffer ?? undefined, // Prefer buffer (same as test harness); omit when URL-only
+            referenceImageUrl, // Pass reference URL when no buffer (e.g. client URL or Supabase)
             finalConceptId // Pass concept ID for logging
           );
           console.log('[RENDER] generateConceptImage OK', { duration: Date.now() - renderStart });
         } catch (error) {
-          console.error('[RENDER] generateConceptImage FAIL', { duration: Date.now() - renderStart, error: error instanceof Error ? error.message : String(error) });
+          const errMsg = error instanceof Error ? error.message : String(error);
+          console.error('[RENDER] generateConceptImage FAIL', { duration: Date.now() - renderStart, error: errMsg });
           // Handle reference image fetch failures
           if (error instanceof Error && error.message.includes('Failed to fetch reference image')) {
-            console.error('Reference image fetch failed:', error);
             res.status(500).json({
               error: 'REFERENCE_IMAGE_FETCH_FAILED',
               message: 'Failed to fetch reference axonometric image for correlation.',
@@ -964,16 +1283,29 @@ export function createServer(): express.Application {
             });
             return;
           }
-          // Handle connection errors with actionable hint
-          if (error instanceof Error && (error.message.includes('Connection') || error.message.includes('ECONNREFUSED') || error.message.includes('fetch failed'))) {
+          // Connection / OpenAI errors: return 503 so client never sees generic 500
+          const msgLower = errMsg.toLowerCase();
+          const isConnectionError =
+            msgLower.includes('connection') ||
+            msgLower.includes('econnrefused') ||
+            msgLower.includes('enotfound') ||
+            msgLower.includes('fetch failed') ||
+            msgLower.includes('failed to connect to openai') ||
+            msgLower.includes('failed to generate concept image');
+          if (isConnectionError) {
             res.status(503).json({
               error: 'OPENAI_CONNECTION_FAILED',
-              message: error.message,
-              hint: 'Vercel serverless may have connectivity issues to OpenAI. Ensure OPENAI_API_KEY is set. Consider AI_GATEWAY_API_KEY for chat, or deploy to Railway/Render for image generation.',
+              message: errMsg,
+              hint: 'Set AI_GATEWAY_API_KEY in Vercel and add your OpenAI key in AI Gateway → Bring Your Own Key. Or use the jobs API (POST /api/jobs/render then poll /api/jobs/:id).',
             });
             return;
           }
-          throw error;
+          // Any other render failure: return 500 with message (do not pass to generic handler)
+          res.status(500).json({
+            error: 'RENDER_FAILED',
+            message: errMsg,
+          });
+          return;
         }
 
         // Store the rendered image
@@ -981,15 +1313,22 @@ export function createServer(): express.Application {
           projectId,
           finalConceptId,
           renderType,
-          result.imageBase64
+          result.imageBase64,
+          sb
         );
 
         // Final conceptRange used (from seed)
         const finalConceptRange = conceptBrief.conceptRange;
 
-        // When Supabase is not configured, /tmp is not shared across Vercel instances - include data URL so frontend can display immediately
-        const hasSupabase = !!(process.env.SUPABASE_URL && (process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY));
-        const imageDataUrl = !hasSupabase ? `data:image/png;base64,${result.imageBase64}` : undefined;
+        // Ensure client always gets a displayable image URL (cross-origin safe).
+        // When storage returns a relative path (/storage/...) the client cannot load it from another origin, so use inline data URL.
+        const dataUrl = `data:image/png;base64,${result.imageBase64}`;
+        const useDataUrl = !imageUrl || imageUrl.startsWith('/');
+        if (useDataUrl && process.env.NODE_ENV === 'production') {
+          console.warn('[RENDER] Supabase not configured; returning image inline. For reliable cross-origin display (e.g. Lovable), set SUPABASE_URL and SUPABASE_ANON_KEY or send supabase in request body.');
+        }
+        const displayUrl = useDataUrl ? dataUrl : imageUrl;
+        const imageDataUrl = useDataUrl ? dataUrl : undefined;
 
         // Comprehensive logging
         console.log('=== /api/render completed ===');
@@ -1000,14 +1339,16 @@ export function createServer(): express.Application {
         console.log(`  promptVersion: ${promptResult.promptVersion}`);
         console.log('============================');
 
-        // Build and send response
+        // Both imageUrl and imageDataUrl set so clients using either can display; imageBase64 for blob URL if CSP blocks data:
         const response: RenderResponse = {
           conceptId: finalConceptId,
           renderType: renderType as RenderType,
-          imageUrl,
+          imageUrl: displayUrl,
           ...(imageDataUrl && { imageDataUrl }),
+          ...(useDataUrl && { imageBase64: result.imageBase64 }),
           promptVersion: promptResult.promptVersion,
           conceptRange: finalConceptRange, // Return final conceptRange used
+          conceptSeed, // So client (e.g. Lovable) can cache and send back for consistent plan/section
         };
 
         res.json(response);
@@ -1030,7 +1371,13 @@ export function createServer(): express.Application {
     async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       try {
         // Validate conceptInputs (required) - accept both ConceptBrief and ConceptInputs
-        const conceptInputs = req.body.conceptInputs || req.body;
+        const conceptInputs = req.body?.conceptInputs ?? req.body;
+        if (conceptInputs == null || typeof conceptInputs !== 'object') {
+          res.status(400).json({
+            error: 'conceptInputs or ConceptBrief is required (request body must contain conceptInputs or a ConceptBrief object)',
+          });
+          return;
+        }
         
         // Accept both ConceptBrief (new format) and ConceptInputs (legacy format)
         let conceptBrief: ConceptBrief;
@@ -1294,15 +1641,30 @@ export function createServer(): express.Application {
     console.error('Express error handler:', err);
     console.error('Error stack:', err.stack);
     
-    // Ensure we haven't already sent a response
     if (res.headersSent) {
       return _next(err);
     }
     
-    // Always return JSON error response
+    const msg = err.message || 'An unexpected error occurred';
+    const msgLower = msg.toLowerCase();
+    const isConnectionError =
+      msgLower.includes('connection') ||
+      msgLower.includes('econnrefused') ||
+      msgLower.includes('failed to connect to openai') ||
+      msgLower.includes('failed to generate concept image');
+    
+    if (isConnectionError) {
+      res.status(503).json({
+        error: 'OPENAI_CONNECTION_FAILED',
+        message: msg,
+        hint: 'Set AI_GATEWAY_API_KEY and BYOK in Vercel AI Gateway, or use jobs API: POST /api/jobs/render then poll /api/jobs/:id.',
+      });
+      return;
+    }
+    
     res.status(500).json({
       error: 'Internal server error',
-      message: err.message || 'An unexpected error occurred',
+      message: msg,
       ...(process.env.NODE_ENV === 'development' && { stack: err.stack }),
     });
   });
@@ -1315,7 +1677,7 @@ export function createServer(): express.Application {
  */
 export function startServer(): void {
   const app = createServer();
-  const port = process.env.PORT ?? 3001;
+  const port = process.env.PORT ?? 3000;
 
   app.listen(port, () => {
     console.log(`Server running on port ${port}`);

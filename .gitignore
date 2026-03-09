@@ -1,14 +1,5 @@
 node_modules/
 dist/
-<<<<<<< HEAD
-.env
-.env.local
-.env.*.local
-.jobs/
-.concepts/
-*.log
-.DS_Store
-=======
 *.log
 .DS_Store
 .env
@@ -17,4 +8,3 @@ dist/
 .vercel
 .env*.local
 .concepts/
->>>>>>> origin/main

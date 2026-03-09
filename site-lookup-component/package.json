@@ -23,13 +23,24 @@
     "react-dom": "^18.2.0",
     "typescript": "^5.3.0"
   },
-  "engines": {"node": ">=18"},
-  "keywords": ["constructaos", "site-lookup", "footprint", "geocode"],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "constructaos",
+    "site-lookup",
+    "footprint",
+    "geocode"
+  ],
   "author": "",
   "license": "ISC",
   "repository": {
     "type": "git",
     "url": "https://github.com/leightongrantham/constructaos.git",
     "directory": "site-lookup-component"
+  },
+  "dependencies": {
+    "zustand": "^4.5.0",
+    "@turf/turf": "^7.1.0"
   }
 }

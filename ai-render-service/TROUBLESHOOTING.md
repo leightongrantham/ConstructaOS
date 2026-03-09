@@ -48,8 +48,8 @@ vercel --prod
 npm run dev
 
 # In another terminal, test endpoints
-curl http://localhost:3001/health
-curl -X POST http://localhost:3001/api/jobs/render \
+curl http://localhost:3000/health
+curl -X POST http://localhost:3000/api/jobs/render \
   -H "Content-Type: application/json" \
   -d '{"projectId":"test","renderType":"axonometric","conceptInputs":{}}'
 ```
@@ -79,7 +79,7 @@ Returns `{"ok": true, "gateway": true/false, "results": {...}}` if chat works. I
 **3. Local test**
 ```bash
 npm run dev
-curl http://localhost:3001/api/test/openai
+curl http://localhost:3000/api/test/openai
 ```
 
 ### Fix
@@ -138,10 +138,10 @@ vercel logs [deployment-url]
 npm run dev
 
 # Test in browser
-open http://localhost:3001/health
+open http://localhost:3000/health
 
 # Test with curl
-curl -v http://localhost:3001/api/jobs/render
+curl -v http://localhost:3000/api/jobs/render
 ```
 
 ### 4. Verify Environment Variables
@@ -159,15 +159,15 @@ vercel env add OPENAI_API_KEY
 ```bash
 npm run dev
 ```
-Server runs on `http://localhost:3001`
+Server runs on `http://localhost:3000`
 
 ### Test Endpoints
 ```bash
 # Health check
-curl http://localhost:3001/health
+curl http://localhost:3000/health
 
 # Create job
-curl -X POST http://localhost:3001/api/jobs/render \
+curl -X POST http://localhost:3000/api/jobs/render \
   -H "Content-Type: application/json" \
   -d '{
     "projectId": "test-123",
@@ -191,7 +191,7 @@ curl -X POST http://localhost:3001/api/jobs/render \
   }'
 
 # Check job status (replace JOB_ID)
-curl "http://localhost:3001/api/jobs/JOB_ID?projectId=test-123"
+curl "http://localhost:3000/api/jobs/JOB_ID?projectId=test-123"
 ```
 
 ## Production Checklist

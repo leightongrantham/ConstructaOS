@@ -4,6 +4,7 @@
 
 import express, { type Request, type Response, type NextFunction } from 'express';
 import cors from 'cors';
+import { config as dotenvConfig } from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { randomUUID } from 'crypto';
@@ -82,7 +83,28 @@ export function createServer(): express.Application {
   };
   app.use(cors(corsOptions));
 
-  // Middleware
+  // Delegate /api/jobs/* BEFORE body parsing so the delegated app can read the request body (otherwise "stream is not readable")
+  let jobsApp: express.Application | null = null;
+  const aiRenderServiceDir = join(__dirname, '../ai-render-service');
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    if (!req.path.startsWith('/api/jobs')) return next();
+    (async () => {
+      try {
+        if (!jobsApp) {
+          dotenvConfig({ path: join(aiRenderServiceDir, '.env') });
+          dotenvConfig({ path: join(aiRenderServiceDir, '.env.local') });
+          const { createServer } = await import('../ai-render-service/src/server.js');
+          jobsApp = createServer();
+        }
+        jobsApp(req, res, next);
+      } catch (err) {
+        console.error('Jobs API (ai-render-service) failed:', err);
+        if (!res.headersSent) res.status(500).json({ error: 'Jobs API unavailable', message: err instanceof Error ? err.message : String(err) });
+      }
+    })();
+  });
+
+  // Middleware (after delegate so /api/jobs body is not consumed here)
   app.use(express.json());
 
   // Health check endpoint
@@ -91,42 +113,44 @@ export function createServer(): express.Application {
   });
 
   // GET /storage/* endpoint for serving local storage files
+  // Tries repo root .concepts first, then ai-render-service/.concepts (where jobs may write when run from that package)
   app.get('/storage/*', async (req: Request, res: Response) => {
+    const fs = await import('fs/promises');
+    const { resolve } = await import('path');
     try {
-      // Extract the path after /storage/
-      const storagePath = req.path.replace('/storage/', '');
-      
-      // Construct local file path (from src/ when running with tsx)
-      const localStorageDir = join(__dirname, '../.concepts');
-      const localFilePath = join(localStorageDir, storagePath);
-      
-      // Security check: ensure the path is within the storage directory
-      const normalizedPath = join(localStorageDir, storagePath);
-      if (!normalizedPath.startsWith(localStorageDir)) {
+      const storagePath = req.path.replace(/^\/storage\/?/, '') || req.path;
+      const rootConcepts = join(__dirname, '../.concepts');
+      const aiRenderConcepts = join(__dirname, '../ai-render-service/.concepts');
+      const candidates = [
+        join(rootConcepts, storagePath),
+        join(aiRenderConcepts, storagePath),
+      ];
+
+      const safePath = (dir: string) => {
+        const resolved = resolve(join(dir, storagePath));
+        const resolvedDir = resolve(dir);
+        return resolved.startsWith(resolvedDir);
+      };
+      if (!safePath(rootConcepts) || !safePath(aiRenderConcepts)) {
         res.status(403).json({ error: 'Access denied' });
         return;
       }
-      
-      // Check if file exists and serve it
-      const fs = await import('fs/promises');
-      try {
-        const fileBuffer = await fs.readFile(localFilePath);
-        
-        // Set appropriate content type based on file extension
-        if (localFilePath.endsWith('.png')) {
-          res.setHeader('Content-Type', 'image/png');
-        } else if (localFilePath.endsWith('.json')) {
-          res.setHeader('Content-Type', 'application/json');
-        }
-        
-        res.send(fileBuffer);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-          res.status(404).json({ error: 'File not found' });
-        } else {
-          throw error;
+
+      for (const localFilePath of candidates) {
+        try {
+          const fileBuffer = await fs.readFile(localFilePath);
+          if (localFilePath.endsWith('.png')) {
+            res.setHeader('Content-Type', 'image/png');
+          } else if (localFilePath.endsWith('.json')) {
+            res.setHeader('Content-Type', 'application/json');
+          }
+          res.send(fileBuffer);
+          return;
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
         }
       }
+      res.status(404).json({ error: 'File not found' });
     } catch (error) {
       console.error('Error serving storage file:', error);
       res.status(500).json({ error: 'Failed to serve file' });
@@ -888,7 +912,7 @@ export function createServer(): express.Application {
  */
 export function startServer(): void {
   const app = createServer();
-  const port = process.env.PORT ?? 3001;
+  const port = process.env.PORT ?? 3000;
 
   app.listen(port, () => {
     console.log(`Server running on port ${port}`);

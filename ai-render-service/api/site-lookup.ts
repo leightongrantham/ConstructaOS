@@ -13,9 +13,12 @@ const ALLOWED_ORIGINS = [
   /^https?:\/\/localhost(:\d+)?$/,
   /^https?:\/\/127\.0\.0\.1(:\d+)?$/,
   /\.vercel\.app$/,
-  /lovableproject\.com$/,
-  /lovable\.app$/,
-  /lovable\.dev$/,
+  /\.lovableproject\.com$/,
+  /\.lovable\.app$/,
+  /\.lovable\.dev$/,
+  // Lovable preview/deploy URLs (e.g. id-preview--uuid.lovable.app)
+  /^https:\/\/[a-z0-9-]+--[a-f0-9-]+\.lovable\.(app|dev)$/,
+  /^https:\/\/[a-z0-9-]+\.lovable\.(app|dev)$/,
 ];
 
 function setCorsHeaders(req: VercelRequest, res: VercelResponse): void {
@@ -23,9 +26,10 @@ function setCorsHeaders(req: VercelRequest, res: VercelResponse): void {
   if (origin && ALLOWED_ORIGINS.some((re) => re.test(origin))) {
     res.setHeader('Access-Control-Allow-Origin', origin);
   }
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Max-Age', '86400');
 }
 
 // Types imported for type annotations only (no runtime load)
@@ -37,70 +41,49 @@ interface SiteLookupRequest {
   lng?: number;
 }
 
+/** Best-match footprint with polygon in [lat, lng] for display */
+interface SelectedFootprint {
+  id: number;
+  polygon: Array<[number, number]>;
+  centroid: { lat: number; lng: number };
+  area: number;
+  score: number;
+  classification: 'detached' | 'semi' | 'terrace';
+  adjacencyCount: number;
+}
+
 interface SiteLookupResponse {
   lat: number;
   lng: number;
   displayName: string;
   primary: ExistingBaseline;
+  /** Best-scoring footprint (top candidate) */
+  selectedFootprint: SelectedFootprint | null;
   candidates: Array<{
     id: number;
     centroid: { lat: number; lng: number };
     confidence: 'High' | 'Medium' | 'Low';
     distanceM: number;
+    area: number;
+    classification: 'detached' | 'semi' | 'terrace';
+    adjacencyCount: number;
   }>;
+  /** Confidence for best candidate, 0–1 */
+  confidence: number;
   /** Simplified neighbour building polygons for map context [lat, lng][] */
   neighbourPolygons: Array<{ id: number; polygon: Array<[number, number]> }>;
   disclaimer: string;
-}
-
-/**
- * Calculates the centroid of a polygon
- */
-function calculatePolygonCentroid(
-  polygon: Array<{ lat: number; lng: number }>
-): { lat: number; lng: number } {
-  if (polygon.length === 0) {
-    throw new Error('Cannot calculate centroid of empty polygon');
-  }
-
-  let sumLat = 0;
-  let sumLng = 0;
-
-  for (const point of polygon) {
-    sumLat += point.lat;
-    sumLng += point.lng;
-  }
-
-  return {
-    lat: sumLat / polygon.length,
-    lng: sumLng / polygon.length,
+  /** Set when Overpass lookup failed after retry; footprint data will be null/empty */
+  error?: 'lookup_failed';
+  /** Null when error === 'lookup_failed' */
+  footprint?: null;
+  /** Indicative sale valuation only; not a formal valuation. Present when available. */
+  valuation?: {
+    indicativeValueGbp: number | null;
+    rangeLowGbp: number | null;
+    rangeHighGbp: number | null;
+    disclaimer: string;
   };
-}
-
-/**
- * Calculates the distance between two lat/lng points using Haversine formula
- */
-function calculateDistance(
-  point1: { lat: number; lng: number },
-  point2: { lat: number; lng: number }
-): number {
-  const EARTH_RADIUS_M = 6371000; // Earth radius in meters
-
-  const lat1Rad = (point1.lat * Math.PI) / 180;
-  const lat2Rad = (point2.lat * Math.PI) / 180;
-  const deltaLatRad = ((point2.lat - point1.lat) * Math.PI) / 180;
-  const deltaLngRad = ((point2.lng - point1.lng) * Math.PI) / 180;
-
-  const a =
-    Math.sin(deltaLatRad / 2) * Math.sin(deltaLatRad / 2) +
-    Math.cos(lat1Rad) *
-      Math.cos(lat2Rad) *
-      Math.sin(deltaLngRad / 2) *
-      Math.sin(deltaLngRad / 2);
-
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-  return EARTH_RADIUS_M * c;
 }
 
 /**
@@ -150,15 +133,18 @@ export default async function handler(
     // Dynamic import to defer load until POST (avoids cold-start issues)
     const [
       { geocodeAddress },
-      { queryNearbyBuildingsOverpass },
-      { selectPrimaryBuilding },
+      { queryNearbyBuildingsOverpass, LOOKUP_FAILED },
       { inferExistingBaseline },
+      { scoreFootprint, normalizeToSinglePolygon },
+      turfModule,
     ] = await Promise.all([
       import('../src/services/site/geocodeAddress.js'),
       import('../src/services/site/queryNearbyBuildingsOverpass.js'),
-      import('../src/services/site/selectPrimaryBuilding.js'),
       import('../src/services/site/inferExistingBaseline.js'),
+      import('../src/services/site/footprintScoring.js'),
+      import('@turf/turf'),
     ]);
+    const turf = turfModule;
 
     let lat: number;
     let lng: number;
@@ -182,17 +168,41 @@ export default async function handler(
       displayName = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
     }
 
-    // Query nearby buildings
-    const buildingsResult = await queryNearbyBuildingsOverpass(lat, lng, 40);
+    // Fetch building polygons (20m radius; Overpass retries once on timeout)
+    let buildingsResult: Awaited<ReturnType<typeof queryNearbyBuildingsOverpass>>;
+    try {
+      buildingsResult = await queryNearbyBuildingsOverpass(lat, lng, 20);
+    } catch (overpassError) {
+      const msg = overpassError instanceof Error ? overpassError.message : String(overpassError);
+      if (msg === LOOKUP_FAILED) {
+        const response: SiteLookupResponse = {
+          lat,
+          lng,
+          displayName,
+          primary: createDefaultBaseline(),
+          selectedFootprint: null,
+          candidates: [],
+          confidence: 0,
+          neighbourPolygons: [],
+          disclaimer: 'Existing building is estimated from mapping data; footprint and storeys may be approximate. Not a measured survey.',
+          error: 'lookup_failed',
+          footprint: null,
+        };
+        res.status(200).json(response);
+        return;
+      }
+      throw overpassError;
+    }
 
-    // If no buildings found, return default Unknown baseline
     if (buildingsResult.buildings.length === 0) {
       const response: SiteLookupResponse = {
         lat,
         lng,
         displayName,
         primary: createDefaultBaseline(),
+        selectedFootprint: null,
         candidates: [],
+        confidence: 0,
         neighbourPolygons: [],
         disclaimer: 'Existing building is estimated from mapping data; footprint and storeys may be approximate. Not a measured survey.',
       };
@@ -200,71 +210,167 @@ export default async function handler(
       return;
     }
 
-    // Select primary building
-    const primaryResult = selectPrimaryBuilding(lat, lng, buildingsResult.buildings);
+    // Convert Building[] to FootprintCandidate[] (GeoJSON polygon, centroid [lng,lat], area).
+    // If building is MultiPolygon (multiPolygonRings), merge into one polygon or use largest by area.
+    const buildingToFootprintCandidate = (
+      building: (typeof buildingsResult.buildings)[0]
+    ): import('../src/services/site/footprintScoring.js').FootprintCandidate | null => {
+      let rawGeom: GeoJSON.Polygon | GeoJSON.MultiPolygon;
+      if (building.multiPolygonRings && building.multiPolygonRings.length > 0) {
+        const polygons = building.multiPolygonRings
+          .filter((ring) => ring.length >= 3)
+          .map((ring) => {
+            const coords = ring.map((p) => [p.lng, p.lat] as [number, number]);
+            const first = coords[0];
+            const last = coords[coords.length - 1];
+            if (first && last && (first[0] !== last[0] || first[1] !== last[1])) {
+              coords.push([first[0], first[1]]);
+            }
+            return coords;
+          });
+        if (polygons.length === 0) return null;
+        const firstRing = polygons[0];
+        if (!firstRing) return null;
+        rawGeom = polygons.length === 1
+          ? { type: 'Polygon', coordinates: [firstRing] }
+          : { type: 'MultiPolygon', coordinates: polygons.map((p) => [p]) as [number, number][][][] };
+      } else {
+        if (!building.polygonLatLng || building.polygonLatLng.length < 3) return null;
+        const ring = building.polygonLatLng.map((p) => [p.lng, p.lat] as [number, number]);
+        const first = ring[0];
+        const last = ring[ring.length - 1];
+        if (first && last && (first[0] !== last[0] || first[1] !== last[1])) {
+          ring.push([first[0], first[1]]);
+        }
+        rawGeom = { type: 'Polygon', coordinates: [ring] };
+      }
+      const polygon = normalizeToSinglePolygon(rawGeom);
+      const polyFeature = turf.polygon(polygon.coordinates);
+      const centroid = turf.centroid(polyFeature).geometry.coordinates as [number, number];
+      const area = turf.area(polyFeature);
+      return {
+        id: String(building.id),
+        polygon,
+        centroid,
+        area,
+      };
+    };
 
-    // Infer baseline from primary building
-    const primaryBaseline = inferExistingBaseline(
-      primaryResult.building,
-      buildingsResult.buildings.filter((b) => b.id !== primaryResult.building.id)
+    const footprintCandidates = buildingsResult.buildings
+      .map(buildingToFootprintCandidate)
+      .filter((c): c is NonNullable<typeof c> => c !== null);
+
+    if (footprintCandidates.length === 0) {
+      const response: SiteLookupResponse = {
+        lat,
+        lng,
+        displayName,
+        primary: createDefaultBaseline(),
+        selectedFootprint: null,
+        candidates: [],
+        confidence: 0,
+        neighbourPolygons: [],
+        disclaimer: 'Existing building is estimated from mapping data; footprint and storeys may be approximate. Not a measured survey.',
+      };
+      res.status(200).json(response);
+      return;
+    }
+
+    const geocodePoint = turf.point([lng, lat]);
+    const scored = footprintCandidates.map((candidate) =>
+      scoreFootprint(candidate, geocodePoint, footprintCandidates)
     );
+    scored.sort((a, b) => b.score - a.score);
+    const top5 = scored.slice(0, 5);
 
-    // Calculate candidates (nearest 3 buildings, excluding primary)
-    const targetPoint = { lat, lng };
-    const candidatesWithDistance = buildingsResult.buildings
-      .filter((b) => b.id !== primaryResult.building.id)
-      .map((building) => {
-        if (!building.polygonLatLng || building.polygonLatLng.length < 3) {
-          return null;
-        }
+    function scoreToConfidence(score: number): 'High' | 'Medium' | 'Low' {
+      if (score >= 70) return 'High';
+      if (score >= 40) return 'Medium';
+      return 'Low';
+    }
 
-        const centroid = calculatePolygonCentroid(building.polygonLatLng);
-        const distance = calculateDistance(targetPoint, centroid);
+    const best = top5[0];
+    if (!best) {
+      const response: SiteLookupResponse = {
+        lat,
+        lng,
+        displayName,
+        primary: createDefaultBaseline(),
+        selectedFootprint: null,
+        candidates: [],
+        confidence: 0,
+        neighbourPolygons: [],
+        disclaimer: 'Existing building is estimated from mapping data; footprint and storeys may be approximate. Not a measured survey.',
+      };
+      res.status(200).json(response);
+      return;
+    }
 
-        // Determine confidence based on distance
-        let confidence: 'High' | 'Medium' | 'Low';
-        if (distance <= 10) {
-          confidence = 'High';
-        } else if (distance <= 25) {
-          confidence = 'Medium';
-        } else {
-          confidence = 'Low';
-        }
+    const bestBuilding = buildingsResult.buildings.find((b) => String(b.id) === best.id);
+    const primaryBaseline = bestBuilding
+      ? inferExistingBaseline(
+          bestBuilding,
+          buildingsResult.buildings.filter((b) => b.id !== bestBuilding.id)
+        )
+      : createDefaultBaseline();
+    primaryBaseline.confidence = scoreToConfidence(best.score);
 
-        return {
-          id: building.id,
-          centroid,
-          confidence,
-          distanceM: Math.round(distance * 10) / 10, // Round to 1 decimal place
-        };
-      })
-      .filter((c): c is NonNullable<typeof c> => c !== null)
-      .sort((a, b) => a.distanceM - b.distanceM)
-      .slice(0, 3); // Top 3 candidates
+    const candidates = top5.map((c) => {
+      const distM = turf.distance(geocodePoint, turf.point(c.centroid), { units: 'meters' });
+      return {
+        id: Number(c.id),
+        centroid: { lat: c.centroid[1], lng: c.centroid[0] },
+        confidence: scoreToConfidence(c.score),
+        distanceM: Math.round(distM * 10) / 10,
+        area: c.area,
+        classification: c.classification,
+        adjacencyCount: c.adjacencyCount,
+      };
+    });
 
-    // Neighbour polygons for map context (top 5 nearby, simplified for display)
-    const neighbourBuildings = buildingsResult.buildings
-      .filter((b) => b.id !== primaryResult.building.id && b.polygonLatLng && b.polygonLatLng.length >= 3)
-      .map((b) => ({
-        building: b,
-        distance: calculateDistance(targetPoint, calculatePolygonCentroid(b.polygonLatLng!)),
-      }))
-      .sort((a, b) => a.distance - b.distance)
-      .slice(0, 5)
-      .map(({ building }) => ({
-        id: building.id,
-        polygon: building.polygonLatLng!.map((p) => [p.lat, p.lng] as [number, number]),
-      }));
+    const firstRing = (ring: typeof best.polygon) => ring.coordinates[0] ?? [];
+    const neighbourPolygons = top5.map((c) => ({
+      id: Number(c.id),
+      polygon: firstRing(c.polygon).map(([lng_, lat_]) => [lat_, lng_] as [number, number]),
+    }));
+
+    const selectedFootprint: SelectedFootprint = {
+      id: Number(best.id),
+      polygon: firstRing(best.polygon).map(([lng_, lat_]) => [lat_, lng_] as [number, number]),
+      centroid: { lat: best.centroid[1], lng: best.centroid[0] },
+      area: best.area,
+      score: best.score,
+      classification: best.classification,
+      adjacencyCount: best.adjacencyCount,
+    };
+
+    const confidence = Math.min(1, best.score / 100);
 
     const response: SiteLookupResponse = {
       lat,
       lng,
       displayName,
       primary: primaryBaseline,
-      candidates: candidatesWithDistance,
-      neighbourPolygons: neighbourBuildings,
+      selectedFootprint,
+      candidates,
+      confidence,
+      neighbourPolygons,
       disclaimer: 'Existing building is estimated from mapping data; footprint and storeys may be approximate. Not a measured survey.',
     };
+
+    const valuationModule = await import('../src/services/propertyData/valuationService.js');
+    const postcode =
+      valuationModule.extractUKPostcode(displayName) ?? valuationModule.extractUKPostcode(body.query);
+    if (postcode != null) {
+      const valuationInputs = valuationModule.buildValuationInputs(postcode, primaryBaseline);
+      if (valuationInputs != null) {
+        const apiKey = process.env.PROPERTYDATA_API_KEY;
+        const valuation = await valuationModule.getIndicativeValuation(apiKey, valuationInputs);
+        if (valuation != null) {
+          response.valuation = valuation;
+        }
+      }
+    }
 
     res.status(200).json(response);
   } catch (error) {
@@ -272,9 +378,22 @@ export default async function handler(
     try {
       if (!res.headersSent) {
         setCorsHeaders(req, res);
+        const message =
+          error instanceof Error ? error.message : 'Unknown error occurred';
+        const lower = message.toLowerCase();
+        const isTimeoutOrUnavailable =
+          lower === 'map_service_timeout' ||
+          lower.includes('504') ||
+          lower.includes('503') ||
+          lower.includes('gateway timeout') ||
+          lower.includes('timed out') ||
+          lower.includes('temporarily unavailable') ||
+          lower.includes('failed to query nearby');
         res.status(500).json({
           error: 'Internal server error',
-          message: error instanceof Error ? error.message : 'Unknown error occurred',
+          message: isTimeoutOrUnavailable
+            ? 'Map data service is temporarily unavailable (timeout). Please try again in a moment.'
+            : message,
         });
       }
     } catch (fallbackErr) {

@@ -1,10 +1,10 @@
 /**
  * GET /api/jobs/:jobId - Check job status
- * Proxies to Express app
+ * Proxies to Express app (used when project root is repo root)
  */
 
 import 'dotenv/config';
-import { createServer } from '../../src/server.js';
+import { createServer } from '../../ai-render-service/src/server.js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 let app: ReturnType<typeof createServer> | null = null;

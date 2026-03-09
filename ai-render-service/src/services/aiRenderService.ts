@@ -29,7 +29,7 @@
  * - Selection heuristics are simple and may not always choose the objectively best result.
  */
 
-import { imageClient } from '../utils/openaiClient.js';
+import { imageClient, IMAGE_MODEL } from '../utils/openaiClient.js';
 import { preprocessSketch } from '../utils/imagePreprocess.js';
 import { getPromptForRenderType } from '../prompts/index.js';
 import { optimizePromptWithVision } from './promptOptimizer.js';
@@ -37,9 +37,8 @@ import { selectBestImageFromCandidates } from './imageSelector.js';
 import type { RenderResult, RenderType } from '../types/render.js';
 import { toInternalRenderType } from '../utils/renderTypeMapping.js';
 
-// Image generation uses direct OpenAI (gpt-image-1 not available via AI Gateway)
-if (!process.env.OPENAI_API_KEY) {
-  console.error('WARNING: OPENAI_API_KEY environment variable is not set');
+if (!process.env.OPENAI_API_KEY && !process.env.AI_GATEWAY_API_KEY) {
+  console.error('WARNING: Neither OPENAI_API_KEY nor AI_GATEWAY_API_KEY is set; image generation will fail.');
 }
 
 /**
@@ -140,9 +139,9 @@ async function generateImageWithOpenAI(
   // Build request parameters
   // Using largest available API size - input images are upscaled to 4096px before processing
   // API supports: '1024x1024', '1024x1536', '1536x1024', and 'auto'
-  console.log(`Generating ${numSamples} image sample(s) using gpt-image-1...`);
+  console.log(`Generating ${numSamples} image sample(s) using ${IMAGE_MODEL}...`);
   const requestParams: Parameters<typeof imageClient.images.generate>[0] = {
-    model: 'gpt-image-1',
+    model: IMAGE_MODEL,
     prompt: promptText,
     size: '1536x1024', // Largest supported landscape size
     n: numSamples, // Generate multiple samples for best-of selection
@@ -157,7 +156,7 @@ async function generateImageWithOpenAI(
     console.log('  (Reference characteristics guide footprint, massing, and style matching)');
   }
 
-  console.log('[RENDER] OpenAI images.generate START', { model: 'gpt-image-1', numSamples, hasRef: !!referenceImageUrl });
+  console.log('[RENDER] OpenAI images.generate START', { model: IMAGE_MODEL, numSamples, hasRef: !!referenceImageUrl });
   const imgStart = Date.now();
   let response;
   const maxAttempts = 3;
@@ -246,13 +245,11 @@ export async function generateConceptImage(
   // Start timing
   const startTime = Date.now();
   
-  // Validate API key
-  if (!process.env.OPENAI_API_KEY) {
-    throw new Error('OPENAI_API_KEY environment variable is not set. Please set it in your .env file.');
+  // Validate API key (direct OpenAI or gateway key; gateway uses BYOK for OpenAI)
+  if (!process.env.OPENAI_API_KEY && !process.env.AI_GATEWAY_API_KEY) {
+    throw new Error('Set OPENAI_API_KEY (direct) or AI_GATEWAY_API_KEY (Vercel gateway + BYOK) in environment variables.');
   }
-  
-  // Validate API key format (should start with 'sk-')
-  if (!process.env.OPENAI_API_KEY.startsWith('sk-')) {
+  if (process.env.OPENAI_API_KEY && !process.env.OPENAI_API_KEY.startsWith('sk-')) {
     console.warn('WARNING: OPENAI_API_KEY does not appear to be in the correct format (should start with "sk-")');
   }
 
@@ -427,16 +424,23 @@ export async function generateConceptImage(
       if (error.message.includes('API key')) {
         throw new Error('Invalid or missing OpenAI API key. Please check your OPENAI_API_KEY environment variable.');
       }
-      // Check for connection errors (common on Vercel serverless)
-      if (error.message.includes('Connection') || error.message.includes('ECONNREFUSED') || error.message.includes('ENOTFOUND') || error.message.includes('fetch failed')) {
-        const cause = error.cause ? ` (cause: ${String(error.cause)})` : '';
-        console.error('OpenAI API connection error:', error.message, cause);
-        console.error('This could be due to:');
-        console.error('  1. Network connectivity from Vercel serverless (try AI Gateway for chat - see README)');
-        console.error('  2. Invalid or missing OPENAI_API_KEY');
-        console.error('  3. OpenAI API service outage');
-        console.error('  4. Firewall/proxy blocking the connection');
-        throw new Error(`Failed to connect to OpenAI API: ${error.message}. Please check your network connection and OPENAI_API_KEY environment variable.`);
+      // Check for connection errors (common on Vercel serverless when not using AI Gateway)
+      const causeMsg = error.cause instanceof Error ? error.cause.message : String(error.cause ?? '');
+      const fullMsg = `${error.message} ${causeMsg}`.toLowerCase();
+      const isConnectionError =
+        fullMsg.includes('connection') ||
+        fullMsg.includes('econnrefused') ||
+        fullMsg.includes('enotfound') ||
+        fullMsg.includes('fetch failed') ||
+        fullMsg.includes('etimedout') ||
+        fullMsg.includes('socket hang up');
+      if (isConnectionError) {
+        console.error('OpenAI API connection error:', error.message, error.cause ? `(cause: ${String(error.cause)})` : '');
+        console.error('On Vercel: add AI_GATEWAY_API_KEY and configure BYOK (OpenAI key) in Vercel AI Gateway to route image generation through the gateway and avoid connection errors.');
+        throw new Error(
+          `Failed to connect to OpenAI API: ${error.message}. ` +
+          'On Vercel, set AI_GATEWAY_API_KEY and add your OpenAI key in AI Gateway → Bring Your Own Key so image generation uses the gateway.'
+        );
       }
       // Re-throw with more context
       throw new Error(`Failed to generate concept image: ${error.message}`);
