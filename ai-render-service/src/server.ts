@@ -23,7 +23,7 @@ import type { ConceptInputs, ConceptBrief } from './types/conceptInputs.js';
 import type { ExistingBaseline } from './services/site/inferExistingBaseline.js';
 import { legacyInputsToConceptBrief } from './types/conceptInputs.js';
 import type { RenderType, RenderResponse, SiteInput, ExistingBuildingPayload } from './types/render.js';
-import type { RenderJob, JobCreateRequest, JobStatusResponse } from './types/job.js';
+import type { RenderJob, JobStatusResponse } from './types/job.js';
 import { storeJob, getJob } from './utils/jobStorage.js';
 import { extractSupabaseConfig, resolveSupabaseConfig } from './utils/supabaseConfig.js';
 import type { ConceptSeed as ConceptSeedType, StoreyCount } from './services/generateConceptSeed.js';
@@ -200,6 +200,323 @@ function isValidConceptInputs(value: unknown): value is ConceptInputs {
   );
 }
 
+type LegacyClientRenderType =
+  | 'concept-axon'
+  | 'concept-axonometric'
+  | 'concept-axonometric-cutaway'
+  | 'concept-plan'
+  | 'concept-floor-plan'
+  | 'concept-section';
+
+function normalizeIncomingRenderType(renderType: unknown): RenderType | undefined {
+  if (renderType === 'axonometric' || renderType === 'floor_plan' || renderType === 'section') return renderType;
+  if (typeof renderType !== 'string') return undefined;
+  const rt = renderType.trim();
+
+  // Common legacy/client aliases (Lovable + UI prototyping)
+  const legacyMap: Record<LegacyClientRenderType, RenderType> = {
+    'concept-axon': 'axonometric',
+    'concept-axonometric': 'axonometric',
+    'concept-axonometric-cutaway': 'axonometric',
+    'concept-plan': 'floor_plan',
+    'concept-floor-plan': 'floor_plan',
+    'concept-section': 'section',
+  };
+  if (rt in legacyMap) return legacyMap[rt as LegacyClientRenderType];
+
+  // Also accept underscore forms if someone passes outputType by mistake
+  const underscoreMap: Record<string, RenderType> = {
+    concept_axonometric: 'axonometric',
+    concept_plan: 'floor_plan',
+    concept_section: 'section',
+  };
+  if (rt in underscoreMap) return underscoreMap[rt] ?? undefined;
+
+  return undefined;
+}
+
+function mapConceptRange(input: unknown): ConceptBrief['conceptRange'] | undefined {
+  if (typeof input !== 'string') return undefined;
+  const v = input.trim().toLowerCase();
+  if (v === 'grounded') return 'Grounded';
+  if (v === 'exploratory') return 'Exploratory';
+  if (v === 'speculative') return 'Speculative';
+  // Allow already-capitalized internal values
+  if (input === 'Grounded' || input === 'Exploratory' || input === 'Speculative') return input as ConceptBrief['conceptRange'];
+  return undefined;
+}
+
+function mapProjectType(input: unknown): ConceptBrief['proposedDesign']['projectType'] | undefined {
+  if (typeof input !== 'string') return undefined;
+  const v = input.trim();
+  if (v === 'extension' || v === 'renovation' || v === 'new_build') return v;
+  if (v === 'new-build') return 'new_build';
+  return undefined;
+}
+
+function mapStoreys(input: unknown): any {
+  if (typeof input !== 'string') return undefined;
+  const v = input.trim();
+  if (v === '1') return 'one';
+  if (v === '2') return 'two';
+  if (v === '3+') return 'three_plus';
+  return undefined;
+}
+
+function mapFloorAreaRange(input: unknown): any {
+  if (typeof input !== 'string') return undefined;
+  const v = input.trim();
+  const m: Record<string, string> = {
+    '0-25': '0_25',
+    '25-50': '25_50',
+    '50-75': '50_75',
+    '75-100': '75_100',
+    '100-150': '100_150',
+    '150-200': '150_200',
+    '200+': '200_plus',
+  };
+  return m[v];
+}
+
+function mapBuildingForm(input: unknown): any {
+  if (typeof input !== 'string') return undefined;
+  const v = input.trim().toLowerCase();
+  if (v === 'detached') return 'detached';
+  if (v === 'semi-detached' || v === 'semi_detached' || v === 'semi') return 'semi_detached';
+  if (v === 'terraced' || v === 'terrace') return 'terraced';
+  if (v === 'infill') return 'infill';
+  return undefined;
+}
+
+function mapRoofType(input: unknown): any {
+  if (typeof input !== 'string') return undefined;
+  const v = input.trim().toLowerCase();
+  if (v === 'flat' || v === 'pitched' || v === 'mixed') return v;
+  return undefined;
+}
+
+function mapKitchenType(input: unknown): any {
+  if (typeof input !== 'string') return undefined;
+  const v = input.trim().toLowerCase();
+  if (v === 'open-plan' || v === 'open_plan') return 'open_plan';
+  if (v === 'semi-open' || v === 'semi_open') return 'semi_open';
+  if (v === 'separate') return 'separate';
+  return undefined;
+}
+
+function mapLivingSpaces(input: unknown): any {
+  if (typeof input !== 'string') return undefined;
+  const v = input.trim().toLowerCase();
+  if (v === 'single' || v === 'single_main_space') return 'single_main_space';
+  if (v === 'multiple' || v === 'multiple_living_areas') return 'multiple_living_areas';
+  return undefined;
+}
+
+function mapMassingPreference(input: unknown): any {
+  if (typeof input !== 'string') return undefined;
+  const v = input.trim().toLowerCase();
+  const m: Record<string, string> = {
+    'split-volumes': 'split_volumes',
+    'split_volumes': 'split_volumes',
+    'stepped': 'stepped',
+    'simple-compact': 'simple_compact',
+    'simple_compact': 'simple_compact',
+    'linear-elongated': 'linear_elongated',
+    'linear_elongated': 'linear_elongated',
+    'courtyard': 'courtyard',
+    'vertical-tall': 'vertical_tall',
+    'vertical_tall': 'vertical_tall',
+  };
+  return m[v];
+}
+
+function mapOrientation(input: unknown): any {
+  if (typeof input !== 'string') return undefined;
+  const v = input.trim().toLowerCase();
+  const m: Record<string, string> = {
+    'north-facing-rear': 'north_facing_rear',
+    'south-facing-rear': 'south_facing_rear',
+    'north_facing_rear': 'north_facing_rear',
+    'south_facing_rear': 'south_facing_rear',
+    east: 'east',
+    west: 'west',
+  };
+  return m[v];
+}
+
+function mapBedrooms(input: unknown): any {
+  if (typeof input === 'number' && Number.isFinite(input)) {
+    if (input <= 0) return 'zero';
+    if (input === 1) return 'one';
+    if (input === 2) return 'two';
+    if (input === 3) return 'three';
+    return 'four_plus';
+  }
+  if (typeof input === 'string') {
+    const n = Number(input);
+    if (!Number.isNaN(n)) return mapBedrooms(n);
+  }
+  return undefined;
+}
+
+function mapBathrooms(input: unknown): any {
+  if (typeof input === 'number' && Number.isFinite(input)) {
+    if (input <= 0) return 'zero';
+    if (input === 1) return 'one';
+    if (input === 2) return 'two';
+    return 'three_plus';
+  }
+  if (typeof input === 'string') {
+    const n = Number(input);
+    if (!Number.isNaN(n)) return mapBathrooms(n);
+  }
+  return undefined;
+}
+
+function mapExtensionType(input: unknown): any {
+  if (typeof input !== 'string') return undefined;
+  const v = input.trim().toLowerCase();
+  const m: Record<string, string> = {
+    rear: 'rear',
+    side: 'side',
+    'side-and-rear': 'side_and_rear',
+    'side_and_rear': 'side_and_rear',
+    'wrap-around': 'wrap_around',
+    wrap_around: 'wrap_around',
+    'two-storey': 'two_storey',
+    two_storey: 'two_storey',
+    'single-storey': 'single_storey',
+    single_storey: 'single_storey',
+  };
+  return m[v];
+}
+
+function mapOutputTypeToConceptOutputType(input: unknown): any {
+  if (typeof input !== 'string') return undefined;
+  const v = input.trim().toLowerCase();
+  if (v === 'concept-axon' || v === 'concept_axonometric' || v === 'concept-axonometric') return 'concept_axonometric';
+  if (v === 'isometric-plan' || v === 'concept-plan' || v === 'concept_plan' || v === 'concept-floor-plan') return 'concept_plan';
+  if (v === 'concept-section' || v === 'concept_section') return 'concept_section';
+  return undefined;
+}
+
+function conceptBriefFromNewSchema(body: Record<string, unknown>): ConceptBrief | null {
+  const proposedAddition = body.proposedAddition as Record<string, unknown> | undefined;
+  const outputSettings = body.outputSettings as Record<string, unknown> | undefined;
+  if (!proposedAddition || typeof proposedAddition !== 'object' || !outputSettings || typeof outputSettings !== 'object') return null;
+
+  const projectType = mapProjectType(proposedAddition.projectType);
+  const outputType = mapOutputTypeToConceptOutputType(outputSettings.outputType);
+  if (!projectType || !outputType) return null;
+
+  const existingBuilding = (body.existingBuilding as Record<string, unknown> | undefined) ?? undefined;
+
+  const existingContext: ConceptBrief['existingContext'] | undefined = existingBuilding
+    ? {
+        buildingForm: mapBuildingForm(existingBuilding.buildingForm),
+        density: typeof existingBuilding.density === 'string' ? (existingBuilding.density as any) : undefined,
+        orientation: mapOrientation(existingBuilding.orientation),
+      }
+    : undefined;
+
+  const baseProposed: Record<string, unknown> = {
+    projectType,
+    roofType: mapRoofType(proposedAddition.roofType),
+    massingPreference: mapMassingPreference(proposedAddition.massingPreference),
+    kitchenType: mapKitchenType(proposedAddition.kitchenType),
+    livingSpaces: mapLivingSpaces(proposedAddition.livingSpaces),
+    bedrooms: mapBedrooms(proposedAddition.bedrooms),
+    bathrooms: mapBathrooms(proposedAddition.bathrooms),
+    orientation: mapOrientation(proposedAddition.orientation),
+    outputType,
+    footprintScale: typeof proposedAddition.footprintScale === 'string' ? (proposedAddition.footprintScale as any) : undefined,
+  };
+
+  if (projectType === 'new_build') {
+    baseProposed.storeys = mapStoreys(proposedAddition.storeys);
+    baseProposed.totalFloorAreaRange = mapFloorAreaRange(proposedAddition.floorAreaRange);
+    if (typeof proposedAddition.numberOfPlots === 'string') baseProposed.numberOfPlots = (proposedAddition.numberOfPlots as any);
+  } else if (projectType === 'extension') {
+    baseProposed.extensionType = mapExtensionType(proposedAddition.extensionType);
+    baseProposed.additionalFloorAreaRange = mapFloorAreaRange(proposedAddition.floorAreaRange);
+  } else if (projectType === 'renovation') {
+    if (typeof proposedAddition.renovationScope === 'string') {
+      baseProposed.renovationScope = proposedAddition.renovationScope as any;
+    }
+  }
+
+  const brief: ConceptBrief = {
+    proposedDesign: baseProposed as any,
+  };
+  const range = mapConceptRange(outputSettings.conceptRange);
+  if (range) brief.conceptRange = range;
+  if (existingContext) brief.existingContext = existingContext;
+
+  return brief;
+}
+
+/**
+ * Normalize incoming payload shapes.
+ * - Some clients send `{ conceptInputs: { projectId, proposedDesign, ... }, renderType: "concept-axon" }`
+ * - Others send `{ projectId, renderType: "axonometric", conceptInputs: { ... } }`
+ */
+function normalizeRenderRequestBody(body: Record<string, unknown>): {
+  projectId?: string;
+  renderType?: RenderType;
+  conceptId?: string;
+  conceptInputs?: unknown;
+  includePeopleInPlan?: unknown;
+  includePeopleInSection?: unknown;
+  /** When true, return the raw render result (like `test/runLocalRender.ts`). */
+  returnRawResult?: boolean;
+} {
+  const newBrief = conceptBriefFromNewSchema(body);
+  const conceptInputs = (newBrief ?? body.conceptInputs) as unknown;
+  const wrappedConceptInputs = (body.conceptInputs && typeof body.conceptInputs === 'object' ? body.conceptInputs : undefined) as Record<string, unknown> | undefined;
+
+  // projectId may be top-level or nested inside conceptInputs (some clients treat it as part of "conceptInputs")
+  const projectId =
+    (typeof body.projectId === 'string' && body.projectId.trim()) ||
+    (wrappedConceptInputs && typeof wrappedConceptInputs.projectId === 'string' && wrappedConceptInputs.projectId.trim()) ||
+    undefined;
+
+  const normalizedRenderType =
+    normalizeIncomingRenderType(body.renderType) ??
+    normalizeIncomingRenderType((body.outputSettings as Record<string, unknown> | undefined)?.outputType);
+  const conceptId = typeof body.conceptId === 'string' && body.conceptId.trim() ? body.conceptId.trim() : undefined;
+
+  // Allow boolean flag or string "true"
+  const returnRawResult =
+    body.returnRawResult === true ||
+    body.returnRawResult === 'true' ||
+    body.returnFormat === 'raw' ||
+    body.returnFormat === 'harness';
+
+  const out: {
+    projectId?: string;
+    renderType?: RenderType;
+    conceptId?: string;
+    conceptInputs?: unknown;
+    includePeopleInPlan?: unknown;
+    includePeopleInSection?: unknown;
+    returnRawResult?: boolean;
+  } = {};
+  if (projectId !== undefined) out.projectId = projectId;
+  if (normalizedRenderType !== undefined) out.renderType = normalizedRenderType;
+  if (conceptId !== undefined) out.conceptId = conceptId;
+  if (conceptInputs !== undefined) out.conceptInputs = conceptInputs;
+  if (body.includePeopleInPlan !== undefined) out.includePeopleInPlan = body.includePeopleInPlan;
+  if (body.includePeopleInSection !== undefined) out.includePeopleInSection = body.includePeopleInSection;
+  // New schema: booleans are nested under outputSettings
+  const os = body.outputSettings as Record<string, unknown> | undefined;
+  if (os && typeof os === 'object') {
+    if (out.includePeopleInPlan === undefined && os.includePeopleInPlan !== undefined) out.includePeopleInPlan = os.includePeopleInPlan;
+    if (out.includePeopleInSection === undefined && os.includePeopleInSection !== undefined) out.includePeopleInSection = os.includePeopleInSection;
+  }
+  if (returnRawResult) out.returnRawResult = true;
+  return out;
+}
+
 export function createServer(): express.Application {
   const app = express();
 
@@ -368,7 +685,18 @@ export function createServer(): express.Application {
     '/api/jobs/render',
     async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       try {
-        const { projectId, renderType, conceptInputs, conceptId } = req.body as JobCreateRequest & { conceptInputs: any };
+        const body = req.body as Record<string, unknown>;
+        const directProjectId = typeof body.projectId === 'string' ? body.projectId.trim() : '';
+        const nestedProjectId =
+          body.conceptInputs &&
+          typeof body.conceptInputs === 'object' &&
+          typeof (body.conceptInputs as Record<string, unknown>).projectId === 'string'
+            ? ((body.conceptInputs as Record<string, unknown>).projectId as string).trim()
+            : '';
+        const projectId = (directProjectId || nestedProjectId) || undefined;
+        const renderType = normalizeIncomingRenderType(body.renderType);
+        const conceptInputs = body.conceptInputs as any;
+        const conceptId = typeof body.conceptId === 'string' ? body.conceptId : undefined;
         const sbClientConfig = extractSupabaseConfig(req.body);
         const sb = resolveSupabaseConfig(sbClientConfig);
 
@@ -1009,7 +1337,16 @@ export function createServer(): express.Application {
       }
 
       try {
-        let { projectId: rawProjectId, renderType, conceptId, conceptInputs, includePeopleInPlan, includePeopleInSection } = req.body;
+        const normalized = normalizeRenderRequestBody(req.body as Record<string, unknown>);
+        let {
+          projectId: rawProjectId,
+          renderType,
+          conceptId,
+          conceptInputs,
+          includePeopleInPlan,
+          includePeopleInSection,
+          returnRawResult,
+        } = normalized;
 
         // Resolve Supabase config from request body (Lovable sends its own creds) or env vars
         const sbClientConfig = extractSupabaseConfig(req.body);
@@ -1018,9 +1355,9 @@ export function createServer(): express.Application {
         // projectId optional - default to "default" for storage organization
         const projectId = (rawProjectId && typeof rawProjectId === 'string') ? rawProjectId : 'default';
 
-        if (!renderType || typeof renderType !== 'string') {
+        if (!renderType) {
           res.status(400).json({
-            error: 'renderType is required and must be a string',
+            error: 'renderType is required and must be one of: "axonometric", "floor_plan", "section" (or legacy aliases like "concept-axon")',
           });
           return;
         }
@@ -1350,6 +1687,25 @@ export function createServer(): express.Application {
           conceptRange: finalConceptRange, // Return final conceptRange used
           conceptSeed, // So client (e.g. Lovable) can cache and send back for consistent plan/section
         };
+
+        // Some clients want the raw render result (like `test/runLocalRender.ts`) rather than the storage-oriented RenderResponse.
+        // This is opt-in so the default API remains stable.
+        if (returnRawResult) {
+          res.json({
+            conceptId: finalConceptId,
+            projectId,
+            renderType: response.renderType,
+            promptVersion: response.promptVersion,
+            model: result.model,
+            imageBase64: result.imageBase64,
+            // Keep handy fields for web clients too:
+            imageUrl: response.imageUrl,
+            ...(response.imageDataUrl && { imageDataUrl: response.imageDataUrl }),
+            conceptRange: response.conceptRange,
+            conceptSeed: response.conceptSeed,
+          });
+          return;
+        }
 
         res.json(response);
       } catch (error) {

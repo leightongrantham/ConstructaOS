@@ -310,7 +310,7 @@ export function buildConceptPrompt(
       conceptSeed: options.conceptSeed,
       brief,
       styleLock,
-      hasReferenceAxon: options.hasReferenceAxon,
+      hasReferenceAxon: !!options.hasReferenceAxon,
     };
     if (options.baselineFootprintScaleOverride) {
       planArgs.baselineFootprintScaleOverride = options.baselineFootprintScaleOverride;
