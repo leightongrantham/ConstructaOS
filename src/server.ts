@@ -17,7 +17,24 @@ import { queryNearbyBuildings } from './services/queryNearbyBuildings.js';
 import { inferExistingContextFromOSM } from './services/inferExistingContextFromOSM.js';
 import { generateConceptSeed } from './services/generateConceptSeed.js';
 import { storeConceptSeed, getConceptSeed, storeRenderedImage, loadConceptSeed, saveConceptSeed, loadRenderedImage, getRenderedImageUrl } from './utils/conceptStorage.js';
-import type { ConceptInputs, ConceptBrief } from './types/conceptInputs.js';
+import type {
+  ConceptInputs,
+  ConceptBrief,
+  ProjectType,
+  BuildingForm,
+  Storeys,
+  NumberOfPlots,
+  FloorAreaRange,
+  Bedrooms,
+  Bathrooms,
+  KitchenType,
+  LivingSpaces,
+  RoofType,
+  MassingPreference,
+  Orientation,
+  Density,
+  OutputType,
+} from './types/conceptInputs.js';
 import { legacyInputsToConceptBrief, conceptBriefToLegacyInputs } from './types/conceptInputs.js';
 import type { RenderType, RenderResponse } from './types/render.js';
 
@@ -41,6 +58,232 @@ function isValidConceptInputs(value: unknown): value is ConceptInputs {
     typeof inputs.massingPreference === 'string' &&
     typeof inputs.outputType === 'string'
   );
+}
+
+function mapExternalProjectType(value: unknown): ProjectType | undefined {
+  if (typeof value !== 'string') return undefined;
+  const v = value.trim();
+  if (v === 'extension' || v === 'renovation' || v === 'new_build') return v;
+  if (v === 'new-build') return 'new_build';
+  return undefined;
+}
+
+function mapExternalBuildingForm(value: unknown): BuildingForm | undefined {
+  if (typeof value !== 'string') return undefined as any;
+  const v = value.trim().toLowerCase();
+  switch (v) {
+    case 'detached': return 'detached';
+    case 'semi-detached':
+    case 'semi_detached':
+    case 'semi': return 'semi_detached';
+    case 'terraced':
+    case 'terrace': return 'terraced';
+    case 'infill': return 'infill';
+    default: return undefined;
+  }
+}
+
+function mapExternalStoreys(value: unknown): Storeys | undefined {
+  if (typeof value !== 'string') return undefined as any;
+  const v = value.trim();
+  switch (v) {
+    case '1': return 'one';
+    case '2': return 'two';
+    case '3+':
+    case 'three_plus': return 'three_plus';
+    default: return undefined;
+  }
+}
+
+function mapExternalNumberOfPlots(value: unknown): NumberOfPlots | undefined {
+  if (typeof value !== 'string') return undefined as any;
+  switch (value.trim()) {
+    case '1': return 'one';
+    case '2': return 'two';
+    case '3-5':
+    case '3_to_5':
+    case 'three_to_five': return 'three_to_five';
+    case '5-10':
+    case 'five_to_ten': return 'five_to_ten';
+    default: return undefined;
+  }
+}
+
+function mapExternalFloorAreaRange(value: unknown): FloorAreaRange | undefined {
+  if (typeof value !== 'string') return undefined as any;
+  const v = value.trim();
+  const m: Record<string, string> = {
+    '50-75': '50_75',
+    '75-100': '75_100',
+    '100-150': '100_150',
+    '150-200': '150_200',
+    '200+': '200_plus',
+  };
+  return m[v] as FloorAreaRange | undefined;
+}
+
+function mapExternalBedrooms(value: unknown): Bedrooms | undefined {
+  const toN = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
+  if (!Number.isFinite(toN)) return undefined as any;
+  if (toN === 1) return 'one';
+  if (toN === 2) return 'two';
+  if (toN === 3) return 'three';
+  if (toN > 3) return 'four_plus';
+  return undefined;
+}
+
+function mapExternalBathrooms(value: unknown): Bathrooms | undefined {
+  const toN = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
+  if (!Number.isFinite(toN)) return undefined as any;
+  if (toN === 1) return 'one';
+  if (toN === 2) return 'two';
+  if (toN > 2) return 'three_plus';
+  return undefined;
+}
+
+function mapExternalKitchenType(value: unknown): KitchenType | undefined {
+  if (typeof value !== 'string') return undefined as any;
+  const v = value.trim().toLowerCase();
+  if (v === 'open-plan' || v === 'open_plan') return 'open_plan';
+  if (v === 'semi-open' || v === 'semi_open') return 'semi_open';
+  if (v === 'separate') return 'separate';
+  return undefined;
+}
+
+function mapExternalLivingSpaces(value: unknown): LivingSpaces | undefined {
+  if (typeof value !== 'string') return undefined as any;
+  const v = value.trim().toLowerCase();
+  if (v === 'single' || v === 'single_main_space') return 'single_main_space';
+  if (v === 'multiple' || v === 'multiple_living_areas') return 'multiple_living_areas';
+  return undefined;
+}
+
+function mapExternalMassingPreference(value: unknown): MassingPreference | undefined {
+  if (typeof value !== 'string') return undefined as any;
+  const v = value.trim().toLowerCase();
+  const m: Record<string, string> = {
+    'split-volumes': 'split_volumes',
+    split_volumes: 'split_volumes',
+    stepped: 'stepped',
+    'simple-compact': 'simple_compact',
+    simple_compact: 'simple_compact',
+    'linear-elongated': 'linear_elongated',
+    linear_elongated: 'linear_elongated',
+    courtyard: 'courtyard',
+    'vertical-tall': 'vertical_tall',
+    vertical_tall: 'vertical_tall',
+  };
+  return m[v] as MassingPreference | undefined;
+}
+
+function mapExternalRoofType(value: unknown): RoofType | undefined {
+  if (typeof value !== 'string') return undefined as any;
+  const v = value.trim().toLowerCase();
+  if (v === 'flat' || v === 'pitched' || v === 'mixed') return v as RoofType;
+  return undefined;
+}
+
+function mapExternalOrientation(value: unknown): Orientation | undefined {
+  if (typeof value !== 'string') return undefined as any;
+  const v = value.trim().toLowerCase();
+  const m: Record<string, string> = {
+    'north-facing-rear': 'north_facing_rear',
+    'south-facing-rear': 'south_facing_rear',
+    east: 'east',
+    west: 'west',
+    north_facing_rear: 'north_facing_rear',
+    south_facing_rear: 'south_facing_rear',
+  };
+  return m[v] as Orientation | undefined;
+}
+
+function mapExternalDensity(value: unknown): Density | undefined {
+  if (typeof value !== 'string') return undefined as any;
+  const v = value.trim().toLowerCase();
+  if (v === 'suburban' || v === 'urban' || v === 'rural') return v as Density;
+  return undefined;
+}
+
+function mapExternalOutputType(value: unknown): OutputType | undefined {
+  if (typeof value !== 'string') return undefined as any;
+  const v = value.trim().toLowerCase();
+  if (v === 'concept-axon' || v === 'concept_axonometric') return 'concept_axonometric';
+  if (v === 'isometric-plan' || v === 'concept-plan' || v === 'concept_plan') return 'concept_plan';
+  if (v === 'concept-section' || v === 'concept_section') return 'concept_section';
+  return undefined;
+}
+
+function conceptBriefFromExternalSyncPayload(body: Record<string, unknown>): ConceptBrief | null {
+  const proposedDesign = body.proposedDesign as Record<string, unknown> | undefined;
+  const proposedAddition = body.proposedAddition as Record<string, unknown> | undefined;
+  const existingContext = (body.existingContext ?? body.existingBuilding) as Record<string, unknown> | undefined;
+  const outputSettings = body.outputSettings as Record<string, unknown> | undefined;
+
+  // Require the pieces we can reliably map.
+  const pd = proposedAddition ?? proposedDesign;
+  if (!pd || typeof pd !== 'object' || !outputSettings || typeof outputSettings !== 'object') return null;
+
+  const projectType = mapExternalProjectType(pd.projectType);
+  const storeys = mapExternalStoreys(pd.storeys);
+  const numberOfPlots = mapExternalNumberOfPlots(pd.numberOfPlots);
+
+  const existingBuildingForm = existingContext ? mapExternalBuildingForm(existingContext.buildingForm) : undefined;
+  const proposedBuildingForm = mapExternalBuildingForm(pd.buildingForm);
+  const buildingForm = proposedBuildingForm ?? existingBuildingForm;
+
+  const bedrooms = mapExternalBedrooms(pd.bedrooms);
+  const bathrooms = mapExternalBathrooms(pd.bathrooms);
+  const kitchenType = mapExternalKitchenType(pd.kitchenType);
+  const livingSpaces = mapExternalLivingSpaces(pd.livingSpaces);
+  const roofType = mapExternalRoofType(pd.roofType);
+  const massingPreference = mapExternalMassingPreference(pd.massingPreference);
+  const orientation = mapExternalOrientation(pd.orientation);
+  const density = existingContext ? mapExternalDensity(existingContext.density) : undefined;
+  const outputType = mapExternalOutputType(outputSettings.outputType);
+
+  // floor area mapping differs by project type; we only support what your payload uses (new-build).
+  const floorAreaRange = mapExternalFloorAreaRange(pd.floorAreaRange ?? pd.totalFloorAreaRange ?? pd.additionalFloorAreaRange);
+
+  if (!projectType || !storeys || !numberOfPlots || !buildingForm || !bedrooms || !bathrooms || !kitchenType || !livingSpaces || !roofType || !massingPreference || !outputType) {
+    return null;
+  }
+
+  if (projectType === 'new_build') {
+    if (!floorAreaRange) return null;
+    const proposedDesignMapped: ConceptBrief['proposedDesign'] = {
+      projectType,
+      buildingForm,
+      storeys,
+      numberOfPlots,
+      totalFloorAreaRange: floorAreaRange,
+      bedrooms,
+      bathrooms,
+      kitchenType,
+      livingSpaces,
+      roofType,
+      massingPreference,
+      ...(orientation ? { orientation } : {}),
+      ...(density ? { density } : {}),
+      outputType,
+    } as any;
+
+    const existing: ConceptBrief['existingContext'] | undefined = existingContext
+      ? {
+          buildingForm,
+          ...(orientation ? { orientation } : {}),
+          ...(density ? { density } : {}),
+        }
+      : undefined;
+
+    return {
+      proposedDesign: proposedDesignMapped,
+      ...(existing ? { existingContext: existing } : {}),
+    };
+  }
+
+  // For now, we only implement enough mapping to stop your current sync crash.
+  // Extension/renovation can be added once we confirm their incoming naming.
+  return null;
 }
 
 export function createServer(): express.Application {
@@ -470,22 +713,33 @@ export function createServer(): express.Application {
     async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       try {
         // Validate conceptInputs (required) - accept both ConceptBrief and ConceptInputs
-        const conceptInputs = req.body.conceptInputs;
-        
-        // Accept both ConceptBrief (new format) and ConceptInputs (legacy format)
+        const body = req.body as Record<string, unknown>;
+        const conceptInputs = body.conceptInputs as unknown;
+
+        // Accept both ConceptBrief (new format) and ConceptInputs (legacy format).
+        // Also accept the external sync schema used by `render-proxy` (existingContext/proposedDesign/outputSettings).
         let conceptBrief: ConceptBrief;
-        
-        if ('proposedDesign' in conceptInputs) {
-          // Already in ConceptBrief format
-          conceptBrief = conceptInputs as ConceptBrief;
-        } else if (isValidConceptInputs(conceptInputs)) {
-          // Convert legacy ConceptInputs to ConceptBrief
-          conceptBrief = legacyInputsToConceptBrief(conceptInputs);
+
+        if (conceptInputs && typeof conceptInputs === 'object') {
+          if ('proposedDesign' in conceptInputs) {
+            conceptBrief = conceptInputs as ConceptBrief;
+          } else if (isValidConceptInputs(conceptInputs)) {
+            conceptBrief = legacyInputsToConceptBrief(conceptInputs);
+          } else {
+            res.status(400).json({
+              error: 'conceptInputs is present but is not a valid ConceptInputs/ConceptBrief',
+            });
+            return;
+          }
         } else {
-          res.status(400).json({
-            error: 'conceptInputs is required and must be a valid ConceptInputs or ConceptBrief object',
-          });
-          return;
+          const externalBrief = conceptBriefFromExternalSyncPayload(body);
+          if (!externalBrief) {
+            res.status(400).json({
+              error: 'conceptInputs is required (ConceptBrief/ConceptInputs) or provide external fields: proposedDesign/proposedAddition + outputSettings',
+            });
+            return;
+          }
+          conceptBrief = externalBrief;
         }
 
         // Generate conceptId (UUID)
