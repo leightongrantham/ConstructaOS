@@ -265,11 +265,6 @@ export function buildConceptPrompt(
   const { existingContext, proposedDesign } = brief;
   const isNewBuild = proposedDesign.projectType === 'new_build';
 
-  // Validate: non-new-build projects require existingContext
-  if (!isNewBuild && !existingContext) {
-    throw new Error(`existingContext is required for ${proposedDesign.projectType} projects`);
-  }
-
   const parts: string[] = [];
   const isRenovation = proposedDesign.projectType === 'renovation';
 
@@ -281,6 +276,12 @@ export function buildConceptPrompt(
   } else {
     parts.push(
       'You are an architectural designer creating early-stage concept visuals.\nThe output is a conceptual design study, not a technical drawing.'
+    );
+  }
+
+  if (!isNewBuild && !existingContext) {
+    parts.push(
+      'Note: No structured existing-site context was provided. Infer a plausible existing building and site setting consistent with the project type and proposed intervention.'
     );
   }
 
@@ -331,8 +332,14 @@ export function buildConceptPrompt(
   const interventionParts: string[] = [];
   
   if (isRenovation) {
-    // For renovations, describe existing building as baseline
-    interventionParts.push(`Existing building: ${formatBuildingForm(existingContext!.buildingForm)}`);
+    // For renovations, describe existing building as baseline when known
+    if (existingContext?.buildingForm) {
+      interventionParts.push(`Existing building: ${formatBuildingForm(existingContext.buildingForm)}`);
+    } else {
+      interventionParts.push(
+        'Existing building: not specified; infer a plausible typical residential form consistent with the renovation brief.'
+      );
+    }
     interventionParts.push(`Existing storeys: ${formatStoreys(proposedDesign.storeys)}`);
     if (existingContext?.orientation) {
       interventionParts.push(`Existing orientation: ${formatOrientation(existingContext.orientation)}`);

@@ -279,11 +279,6 @@ export function buildConceptPrompt(
   const { existingContext, proposedDesign } = brief;
   const isNewBuild = proposedDesign.projectType === 'new_build';
 
-  // Validate: non-new-build projects require existingContext
-  if (!isNewBuild && !existingContext) {
-    throw new Error(`existingContext is required for ${proposedDesign.projectType} projects`);
-  }
-
   const parts: string[] = [];
   const isRenovation = proposedDesign.projectType === 'renovation';
 
@@ -355,6 +350,12 @@ export function buildConceptPrompt(
   const isExtension = proposedDesign.projectType === 'extension';
   const existingBaseline = options?.conceptSeed?.existingBaseline ?? options?.existingBaseline;
   const hasExistingBaseline = (isRenovation || isExtension) && existingBaseline;
+
+  if (!isNewBuild && !existingContext && !hasExistingBaseline) {
+    parts.push(
+      'Note: No structured existing-site context was provided. Infer a plausible existing building and site setting consistent with the project type and proposed intervention.'
+    );
+  }
 
   if (!isNewBuild && existingContext) {
     const contextParts: string[] = [];
