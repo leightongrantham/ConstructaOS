@@ -1508,6 +1508,18 @@ export function createServer(): express.Application {
           throw new Error('Failed to load or generate concept seed');
         }
 
+        // Deterministic guard: for new-build renders, ensure seed storeys match the request.
+        // Prevents "sticky" 2-storey seeds when the client changes storeys between renders.
+        if (conceptBrief.proposedDesign.projectType === 'new_build' && conceptBrief.proposedDesign.storeys) {
+          const map: Record<typeof conceptBrief.proposedDesign.storeys, StoreyCount> = {
+            one: '1',
+            two: '2',
+            three_plus: '3+',
+          };
+          const mapped = map[conceptBrief.proposedDesign.storeys];
+          if (mapped) conceptSeed.storeys = mapped;
+        }
+
         // AXON REFERENCE: For floor_plan or section, use axon image so prompt and style match test harness.
         // 1) Prefer buffer from storage (same as test harness); 2) else client-supplied referenceAxonUrl/referenceAxonBase64; 3) else URL from storage (Supabase).
         let referenceAxonBuffer: Buffer | undefined;

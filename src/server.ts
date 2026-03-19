@@ -287,6 +287,20 @@ function conceptBriefFromExternalSyncPayload(body: Record<string, unknown>): Con
   return null;
 }
 
+type SeedStoreys = '1' | '2' | '3+';
+
+function mapBriefStoreysToSeedStoreys(
+  storeys: ConceptBrief['proposedDesign']['storeys'] | undefined
+): SeedStoreys | undefined {
+  if (!storeys) return undefined;
+  const map = {
+    one: '1',
+    two: '2',
+    three_plus: '3+',
+  } as const;
+  return map[storeys];
+}
+
 export function createServer(): express.Application {
   const app = express();
 
@@ -643,6 +657,14 @@ export function createServer(): express.Application {
           await saveConceptSeed(projectId, finalConceptId, conceptSeed);
         }
 
+        // Deterministic guard: for new-build renders, ensure the seed storeys match the request.
+        // The prompt generation can include the concept seed JSON; if an old seed exists with 2 storeys,
+        // we want to override it deterministically.
+        if (conceptSeed && conceptBrief.proposedDesign.projectType === 'new_build') {
+          const mapped = mapBriefStoreysToSeedStoreys(conceptBrief.proposedDesign.storeys);
+          if (mapped) conceptSeed.storeys = mapped;
+        }
+
         // AXON REQUIREMENT CHECK: For floor_plan or section, require axon image
         let referenceImageUrl: string | undefined;
         
@@ -765,6 +787,12 @@ export function createServer(): express.Application {
 
         // Generate concept seed
         const conceptSeed = await generateConceptSeed(conceptBrief);
+        // Deterministic guard: for new-build renders, ensure the seed's storeys match the request.
+        // This avoids "sticky" 2-storey seeds when the client changes storeys between renders.
+        if (conceptBrief.proposedDesign.projectType === 'new_build') {
+          const mapped = mapBriefStoreysToSeedStoreys(conceptBrief.proposedDesign.storeys);
+          if (mapped) conceptSeed.storeys = mapped;
+        }
         
         // Store concept seed (non-blocking - don't fail render if storage fails)
         storeConceptSeed(projectId, conceptId, conceptSeed).catch((storageError) => {
