@@ -1518,6 +1518,12 @@ export function createServer(): express.Application {
           };
           const mapped = map[conceptBrief.proposedDesign.storeys];
           if (mapped) conceptSeed.storeys = mapped;
+
+          // Also keep any attached baseline consistent so the prompt's CONCEPT SEED JSON
+          // does not contradict the requested number of storeys.
+          if (conceptSeed.existingBaseline) {
+            conceptSeed.existingBaseline.storeys = mapped;
+          }
         }
 
         // AXON REFERENCE: For floor_plan or section, use axon image so prompt and style match test harness.
