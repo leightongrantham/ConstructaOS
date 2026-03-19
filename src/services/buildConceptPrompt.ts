@@ -365,6 +365,11 @@ export function buildConceptPrompt(
     // For new builds, treat proposedDesign as the whole building
     interventionParts.push(`Building form: ${formatBuildingForm(proposedDesign.buildingForm)}`);
     interventionParts.push(`Number of storeys: ${formatStoreys(proposedDesign.storeys)}`);
+    interventionParts.push(
+      `STRICT REQUIREMENT: The rendered building MUST visually show ${formatStoreys(
+        proposedDesign.storeys
+      )} storeys/levels (for 3+ this means at least three distinct floor levels). Do not depict only 2 storeys.`
+    );
     interventionParts.push(`Number of plots: ${formatNumberOfPlots(proposedDesign.numberOfPlots)}`);
     interventionParts.push(`Approximate total floor area: ${formatFloorAreaRange(proposedDesign.totalFloorAreaRange)} m²`);
     

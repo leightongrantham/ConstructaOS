@@ -139,6 +139,11 @@ export function buildIsometricPlanPrompt(args: BuildIsometricPlanPromptArgs): st
     }
     if (proposedDesign.storeys) {
       interventionParts.push(`Number of storeys: ${formatStoreys(proposedDesign.storeys)}`);
+      interventionParts.push(
+        `STRICT REQUIREMENT: The rendered building MUST have ${formatStoreys(
+          proposedDesign.storeys
+        )} storeys/levels. If this is 3+, depict at least three distinct floor levels; do not depict only 2 storeys.`
+      );
     }
     if (proposedDesign.numberOfPlots) {
       interventionParts.push(`Number of plots: ${formatNumberOfPlots(proposedDesign.numberOfPlots)}`);
