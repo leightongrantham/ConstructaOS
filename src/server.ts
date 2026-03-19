@@ -3,6 +3,7 @@
  */
 
 import express, { type Request, type Response, type NextFunction } from 'express';
+import 'express-async-errors'; // Async route rejections → JSON error handler (avoids Vercel plain-text "An error occurred...")
 import cors from 'cors';
 import { config as dotenvConfig } from 'dotenv';
 import { fileURLToPath } from 'url';
@@ -348,7 +349,21 @@ export function createServer(): express.Application {
   });
 
   // Middleware (after delegate so /api/jobs body is not consumed here)
-  app.use(express.json());
+  app.use(express.json({ limit: '10mb' }));
+
+  // Invalid JSON / body too large → JSON (never plain text) so clients don't get JSON.parse failures
+  app.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
+    if (res.headersSent) return next(err);
+    const isSyntaxError = err instanceof SyntaxError || (err && typeof err === 'object' && 'body' in err);
+    if (isSyntaxError) {
+      res.status(400).json({
+        error: 'Invalid request body',
+        message: err instanceof Error ? err.message : 'Malformed JSON or body too large',
+      });
+      return;
+    }
+    next(err);
+  });
 
   // Health check endpoint
   app.get('/health', (_req: Request, res: Response) => {
