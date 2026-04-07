@@ -19,9 +19,17 @@ import { resolveSupabaseConfig, type SupabaseConfig } from './supabaseConfig.js'
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Local storage directory (fallback when Supabase is not configured)
-// Use /tmp on Vercel/serverless (read-only filesystem except /tmp)
-export const LOCAL_STORAGE_DIR = process.env.VERCEL
+// Local storage directory (fallback when Supabase is not configured).
+// Prefer /tmp for serverless runtimes (Vercel filesystem is not reliably writable outside /tmp).
+const isServerlessRuntime =
+  // Vercel
+  Boolean(process.env.VERCEL || process.env.VERCEL_URL) ||
+  // Lambda-like
+  Boolean(process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.LAMBDA_TASK_ROOT) ||
+  // Cloud Run-like
+  Boolean(process.env.K_SERVICE);
+
+export const LOCAL_STORAGE_DIR = isServerlessRuntime
   ? join('/tmp', '.concepts')
   : join(__dirname, '../../.concepts');
 
@@ -77,6 +85,8 @@ export async function storeConceptSeed(
   if (!sb) {
     // Fallback to local file system storage
     try {
+      // Ensure base directory exists before creating nested paths.
+      await mkdir(LOCAL_STORAGE_DIR, { recursive: true });
       const localFilePath = join(LOCAL_STORAGE_DIR, `projects/${projectId}/concepts/${conceptId}/seed.json`);
       const localDir = dirname(localFilePath);
       

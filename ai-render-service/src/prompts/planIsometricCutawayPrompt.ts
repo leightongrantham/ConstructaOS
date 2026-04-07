@@ -7,6 +7,11 @@
 import type { ConceptBrief } from '../types/conceptInputs.js';
 import type { ConceptSeed } from '../services/generateConceptSeed.js';
 import { conceptRangeAddendum } from './conceptRangeAddendum.js';
+import {
+  appendExistingBuildingDepictionLines,
+  resolveDepictionBuildingForm,
+} from '../utils/resolveDepictionBuildingForm.js';
+import { THIRD_STOREY_ATTIC_GUIDANCE, isThreePlusStoreyForPrompt } from './thirdStoreyAtticGuidance.js';
 
 export interface BuildIsometricPlanPromptArgs {
   conceptSeed: ConceptSeed;
@@ -33,10 +38,14 @@ export function buildIsometricPlanPrompt(args: BuildIsometricPlanPromptArgs): st
     'You are an architectural designer creating early-stage concept visuals.\nThe output is a conceptual design study, not a technical drawing.'
   );
   
-  // When a reference image is attached (often an exterior axonometric), insist on interior cutaway — do not copy the reference's viewpoint
+  // With axon reference: style only. Without: massing comes from brief + seed only (default path).
   if (hasReferenceAxon) {
     parts.push(
       '\nREFERENCE IMAGE (if attached): Use it only for line style, paper texture, and tonal treatment. Do NOT copy its viewpoint. The reference may show an exterior view of a building; your output MUST be an interior cutaway (roof/upper walls removed, dollhouse view showing floor plan and rooms).'
+    );
+  } else {
+    parts.push(
+      '\nNo reference photograph is provided. Derive building form, storeys, footprint, and interior layout entirely from the structured design brief and concept seed in this prompt.'
     );
   }
   
@@ -59,9 +68,11 @@ export function buildIsometricPlanPrompt(args: BuildIsometricPlanPromptArgs): st
   const hasExistingBaseline = (isRenovation || isExtension) && existingBaseline;
 
   if (hasExistingBaseline) {
+    const depictionForm = resolveDepictionBuildingForm(existingBaseline, existingContext);
     const summary: string[] = [];
-    if (existingBaseline.buildingForm !== 'Unknown') {
-      summary.push(existingBaseline.buildingForm.toLowerCase());
+    const labelForm = depictionForm !== 'Unknown' ? depictionForm : existingBaseline.buildingForm;
+    if (labelForm !== 'Unknown') {
+      summary.push(labelForm.toLowerCase());
     }
     if (existingBaseline.storeys !== 'Unknown') {
       summary.push(`${existingBaseline.storeys} storeys`);
@@ -74,17 +85,14 @@ export function buildIsometricPlanPrompt(args: BuildIsometricPlanPromptArgs): st
       'Existing building is estimated from mapping data; footprint and storeys may be approximate. Not a measured survey.\n' +
       'Treat this as fixed baseline massing.'
     );
-    if (existingBaseline.buildingForm === 'Terraced') {
-      parts.push('Depict the existing building as terraced: part of a continuous row with party walls to one or both sides (mid-terrace or end-of-terrace).');
-    } else if (existingBaseline.buildingForm === 'Semi-detached') {
-      parts.push('Depict the existing building as semi-detached: one shared party wall with a neighbouring house, the other side free.');
-    } else if (existingBaseline.buildingForm === 'Detached') {
-      parts.push('Depict the existing building as detached: standalone with clear gaps on both sides, no shared walls with neighbours.');
-    }
+    appendExistingBuildingDepictionLines(parts, depictionForm);
     if (baselineFootprintScaleOverride) {
       const scaleLabel = baselineFootprintScaleOverride === 'compact' ? 'small' : baselineFootprintScaleOverride === 'wide' ? 'large' : 'medium';
       parts.push(`Interpret existing baseline massing as ${scaleLabel} scale for proportion and base massing; footprint geometry is unchanged.`);
     }
+  } else if (existingContext?.buildingForm) {
+    const depictionForm = resolveDepictionBuildingForm(undefined, existingContext);
+    appendExistingBuildingDepictionLines(parts, depictionForm);
   }
 
   // SECTION 3: BRIEF SUMMARY (Existing context from form, if any)
@@ -110,9 +118,16 @@ export function buildIsometricPlanPrompt(args: BuildIsometricPlanPromptArgs): st
 
   if (proposedDesign.projectType === 'renovation') {
     // Use existingBaseline when from address; otherwise existingContext (allows plan from address-only)
-    const existingForm = hasExistingBaseline && existingBaseline.buildingForm !== 'Unknown'
-      ? existingBaseline.buildingForm
-      : existingContext?.buildingForm;
+    const depictionResolved = resolveDepictionBuildingForm(
+      hasExistingBaseline ? existingBaseline : undefined,
+      existingContext
+    );
+    const existingForm =
+      depictionResolved !== 'Unknown'
+        ? depictionResolved
+        : hasExistingBaseline && existingBaseline.buildingForm !== 'Unknown'
+          ? existingBaseline.buildingForm
+          : existingContext?.buildingForm;
     if (existingForm) {
       // Baseline uses 'Detached' | 'Semi-detached' | etc.; brief uses snake_case — display consistently
       const formDisplay = typeof existingForm === 'string' && /^[a-z_]+$/i.test(existingForm)
@@ -120,8 +135,26 @@ export function buildIsometricPlanPrompt(args: BuildIsometricPlanPromptArgs): st
         : String(existingForm).replace(/-/g, ' ');
       interventionParts.push(`Existing building: ${formDisplay}`);
     }
-    const renovationStoreys = hasExistingBaseline ? formatBaselineStoreys(existingBaseline.storeys) : '~2 (estimated, no survey)';
+    const requestedStoreys = proposedDesign.storeys;
+    const renovationStoreys = requestedStoreys
+      ? formatStoreys(requestedStoreys)
+      : hasExistingBaseline
+        ? formatBaselineStoreys(existingBaseline.storeys)
+        : '~2 (estimated, no survey)';
     interventionParts.push(`Existing storeys: ${renovationStoreys}`);
+    if (!hasExistingBaseline && requestedStoreys) {
+      interventionParts.push(
+        `STRICT REQUIREMENT: The existing building MUST have ${formatStoreys(requestedStoreys)} storeys/levels (use the client request as the source of truth when no baseline is available).`
+      );
+    }
+    if (
+      isThreePlusStoreyForPrompt(
+        requestedStoreys,
+        hasExistingBaseline ? existingBaseline.storeys : undefined
+      )
+    ) {
+      interventionParts.push(THIRD_STOREY_ATTIC_GUIDANCE);
+    }
     if (existingContext?.orientation) {
       interventionParts.push(`Existing orientation: ${formatOrientation(existingContext.orientation)}`);
     }
@@ -144,6 +177,9 @@ export function buildIsometricPlanPrompt(args: BuildIsometricPlanPromptArgs): st
           proposedDesign.storeys
         )} storeys/levels. If this is 3+, depict at least three distinct floor levels; do not depict only 2 storeys.`
       );
+      if (proposedDesign.storeys === 'three_plus') {
+        interventionParts.push(THIRD_STOREY_ATTIC_GUIDANCE);
+      }
     }
     if (proposedDesign.numberOfPlots) {
       interventionParts.push(`Number of plots: ${formatNumberOfPlots(proposedDesign.numberOfPlots)}`);
@@ -163,14 +199,33 @@ export function buildIsometricPlanPrompt(args: BuildIsometricPlanPromptArgs): st
   } else if (proposedDesign.projectType === 'extension') {
     // Extension: existing form can come from address baseline or manual existingContext
     interventionParts.push(`Project type: ${formatProjectType(proposedDesign.projectType)}`);
-    const existingFormForExt = hasExistingBaseline && existingBaseline.buildingForm !== 'Unknown'
-      ? baselineFormToBrief(existingBaseline.buildingForm)
-      : existingContext?.buildingForm;
+    const depictionResolvedExt = resolveDepictionBuildingForm(
+      hasExistingBaseline ? existingBaseline : undefined,
+      existingContext
+    );
+    const existingFormForExt =
+      depictionResolvedExt !== 'Unknown'
+        ? baselineFormToBrief(depictionResolvedExt)
+        : hasExistingBaseline && existingBaseline.buildingForm !== 'Unknown'
+          ? baselineFormToBrief(existingBaseline.buildingForm)
+          : existingContext?.buildingForm;
     if (proposedDesign.buildingForm && existingFormForExt !== undefined && proposedDesign.buildingForm !== existingFormForExt) {
       interventionParts.push(`Proposed building form: ${formatBuildingForm(proposedDesign.buildingForm)}`);
     }
-    if (hasExistingBaseline) {
-      interventionParts.push(`Existing building storeys: ${formatBaselineStoreys(existingBaseline.storeys)}`);
+    if (hasExistingBaseline || proposedDesign.storeys) {
+      if (proposedDesign.storeys !== undefined) {
+        interventionParts.push(`Existing building storeys: ${formatStoreys(proposedDesign.storeys)}`);
+      } else if (existingBaseline) {
+        interventionParts.push(`Existing building storeys: ${formatBaselineStoreys(existingBaseline.storeys)}`);
+      }
+    }
+    if (
+      isThreePlusStoreyForPrompt(
+        proposedDesign.storeys,
+        hasExistingBaseline ? existingBaseline.storeys : undefined
+      )
+    ) {
+      interventionParts.push(THIRD_STOREY_ATTIC_GUIDANCE);
     }
     const extStoreys = proposedDesign.extensionType === 'two_storey' ? '2' : proposedDesign.extensionType === 'single_storey' ? '1' : null;
     if (extStoreys) {

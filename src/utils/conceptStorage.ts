@@ -18,10 +18,19 @@ export type { ConceptSeed } from '../services/generateConceptSeed.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Local storage directory (fallback when Supabase is not configured)
-// Path: from src/utils -> project root/.concepts (when running with tsx)
-// Path: from dist/src/utils -> project root/.concepts (when running compiled)
-const LOCAL_STORAGE_DIR = join(__dirname, '../../.concepts');
+// Local storage directory (fallback when Supabase is not configured).
+// On serverless/Vercel, the deployed filesystem is not reliably writable except /tmp.
+const isServerlessRuntime =
+  // Vercel
+  Boolean(process.env.VERCEL || process.env.VERCEL_URL) ||
+  // Lambda-like
+  Boolean(process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.LAMBDA_TASK_ROOT) ||
+  // Cloud Run-like
+  Boolean(process.env.K_SERVICE);
+
+const LOCAL_STORAGE_DIR = isServerlessRuntime
+  ? join('/tmp', '.concepts')
+  : join(__dirname, '../../.concepts');
 
 /**
  * Maps renderType to standardized filename
@@ -77,6 +86,8 @@ export async function storeConceptSeed(
   if (!supabaseUrl || !supabaseKey) {
     // Fallback to local file system storage
     try {
+      // Ensure base directory exists before creating nested paths.
+      await mkdir(LOCAL_STORAGE_DIR, { recursive: true });
       // Use storagePath for consistent path structure
       const localFilePath = join(LOCAL_STORAGE_DIR, storagePath);
       const localDir = dirname(localFilePath);

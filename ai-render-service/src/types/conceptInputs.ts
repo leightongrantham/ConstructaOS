@@ -171,7 +171,7 @@ export interface ExistingContext {
 interface BaseProposedDesign {
   projectType: ProjectType;
   buildingForm?: BuildingForm; // Proposed building form (optional when baseline supplies existing)
-  storeys?: Storeys; // Required only for New Build; Extension/Renovation use existingBaseline.storeys
+  storeys?: Storeys; // New build: required in practice; extension/renovation: optional override when mapping/storeys disagree (e.g. 3+ with loft)
   numberOfPlots?: NumberOfPlots; // Required only for New Build; excluded for Extension/Renovation
   footprintScale?: FootprintScale;
   bedrooms: Bedrooms;

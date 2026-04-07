@@ -82,9 +82,14 @@ async function fetchImageAsBase64(imageUrl: string): Promise<string> {
       return base64;
     }
     
-    // Otherwise, fetch via HTTP
-    const response = await fetch(imageUrl);
-    
+    // Otherwise, fetch via HTTP (some CDNs return 400 without Accept / User-Agent)
+    const response = await fetch(imageUrl, {
+      headers: {
+        Accept: 'image/*,*/*;q=0.8',
+        'User-Agent': 'ConstructaOS-AI-Render/1.0',
+      },
+    });
+
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
@@ -114,25 +119,36 @@ async function fetchImageAsBase64(imageUrl: string): Promise<string> {
  * 
  * @param promptText - The prompt text for image generation
  * @param numSamples - Number of samples to generate (default: 1, for multi-sample use 2-3)
- * @param referenceImageUrl - Optional URL of reference image (for plan/section correlation)
+ * @param referenceImageUrl - Optional URL of reference image (fetched when no buffer)
+ * @param referenceAxonBuffer - Optional axon image already loaded (avoids HTTP fetch; preferred over URL)
  * @returns Array of base64-encoded images (or single image if numSamples is 1)
  */
 async function generateImageWithOpenAI(
   promptText: string,
   numSamples: number = 1,
-  referenceImageUrl?: string
+  referenceImageUrl?: string,
+  referenceAxonBuffer?: Buffer
 ): Promise<string[]> {
-  // Fetch reference image if URL provided
+  // Reference bytes are not currently passed to images.generate (style is in the prompt only).
+  // We still resolved base64 for logging / future use; URL fetch must never hard-fail generation.
   let referenceImageBase64: string | undefined;
-  if (referenceImageUrl) {
+  if (referenceAxonBuffer && referenceAxonBuffer.length > 0) {
+    referenceImageBase64 = referenceAxonBuffer.toString('base64');
+    console.log(
+      `Using in-memory axon reference buffer for plan/section (${referenceImageBase64.length} chars base64, no URL fetch)`
+    );
+  } else if (referenceImageUrl) {
     console.log('Fetching reference image for plan/section correlation...');
     try {
       referenceImageBase64 = await fetchImageAsBase64(referenceImageUrl);
       console.log(`Reference image fetched successfully: ${referenceImageBase64.length} chars base64`);
     } catch (error) {
-      // Re-throw with context for better error handling upstream
-      console.error('Failed to fetch reference image, aborting generation');
-      throw error;
+      const msg = error instanceof Error ? error.message : String(error);
+      console.warn(
+        `[RENDER] Reference image URL fetch failed (${msg}); continuing without downloaded reference. ` +
+          'Prompt may still describe a reference — generation proceeds.'
+      );
+      referenceImageBase64 = undefined;
     }
   }
 
@@ -156,7 +172,11 @@ async function generateImageWithOpenAI(
     console.log('  (Reference characteristics guide footprint, massing, and style matching)');
   }
 
-  console.log('[RENDER] OpenAI images.generate START', { model: IMAGE_MODEL, numSamples, hasRef: !!referenceImageUrl });
+  console.log('[RENDER] OpenAI images.generate START', {
+    model: IMAGE_MODEL,
+    numSamples,
+    hasRefBytes: !!referenceImageBase64,
+  });
   const imgStart = Date.now();
   let response;
   const maxAttempts = 3;
@@ -261,7 +281,9 @@ export async function generateConceptImage(
   console.log(`Render Type (external): ${renderType}`);
   console.log(`Render Type (internal): ${internalRenderType}`);
   if (conceptId) console.log(`Concept ID: ${conceptId}`);
-  console.log(`Reference Image: ${referenceImageUrl ? 'Yes (will fetch and attach)' : 'No'}`);
+  console.log(
+    `Reference Image: ${referenceAxonBuffer && referenceAxonBuffer.length > 0 ? 'Yes (buffer)' : referenceImageUrl ? 'Yes (URL)' : 'No'}`
+  );
   console.log(`Input Sketch: ${sketchBuffer && sketchBuffer.length > 0 ? 'Yes' : 'No'}`);
 
   try {
@@ -358,11 +380,16 @@ export async function generateConceptImage(
     let imageCandidates: string[];
     const genStart = Date.now();
     try {
-      console.log('[RENDER] generateImageWithOpenAI START', { numSamples, hasRef: !!referenceImageUrl });
-      imageCandidates = await generateImageWithOpenAI(
-        optimizedPrompt, 
+      console.log('[RENDER] generateImageWithOpenAI START', {
         numSamples,
-        referenceImageUrl // Pass reference image URL for plan/section correlation
+        hasRefBuffer: !!(referenceAxonBuffer && referenceAxonBuffer.length > 0),
+        hasRefUrl: !!referenceImageUrl,
+      });
+      imageCandidates = await generateImageWithOpenAI(
+        optimizedPrompt,
+        numSamples,
+        referenceImageUrl,
+        referenceAxonBuffer
       );
       console.log('[RENDER] generateImageWithOpenAI OK', { duration: Date.now() - genStart, candidates: imageCandidates.length });
     } catch (error) {
@@ -412,7 +439,7 @@ export async function generateConceptImage(
     console.log(`Render Type (external): ${renderType}`);
     console.log(`Render Type (internal): ${internalRenderType}`);
     if (conceptId) console.log(`Concept ID: ${conceptId}`);
-    console.log(`Reference Attached: ${hasReferenceUrl ? 'Yes' : 'No'}`);
+    console.log(`Reference Attached: ${hasReferenceAxon || hasReferenceUrl ? 'Yes' : 'No'}`);
     console.log(`Duration: ${duration}ms (${(duration / 1000).toFixed(2)}s)`);
     console.log(`Samples Generated: ${imageCandidates.length}`);
     console.log('================================\n');

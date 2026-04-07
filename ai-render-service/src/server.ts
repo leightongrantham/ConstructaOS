@@ -27,6 +27,7 @@ import type { RenderJob, JobStatusResponse } from './types/job.js';
 import { storeJob, getJob } from './utils/jobStorage.js';
 import { extractSupabaseConfig, resolveSupabaseConfig } from './utils/supabaseConfig.js';
 import type { ConceptSeed as ConceptSeedType, StoreyCount } from './services/generateConceptSeed.js';
+import type { Storeys } from './types/conceptInputs.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -88,6 +89,27 @@ function getSiteParams(body: Record<string, unknown>): SiteParams {
   return out;
 }
 
+/**
+ * Floor-plan isometric cutaway and section default to concept brief + seed only (no axon image).
+ * Opt in to correlate with a prior axon: set useAxonReference true, or pass referenceAxonUrl / referenceAxonBase64.
+ */
+function wantsAxonReferenceImage(renderType: RenderType, body: Record<string, unknown> | undefined): boolean {
+  if (renderType !== 'floor_plan' && renderType !== 'section') {
+    return false;
+  }
+  const b = body ?? {};
+  if (b.useAxonReference === true || b.useAxonReference === 'true') {
+    return true;
+  }
+  if (typeof b.referenceAxonUrl === 'string' && b.referenceAxonUrl.trim()) {
+    return true;
+  }
+  if (typeof b.referenceAxonBase64 === 'string' && b.referenceAxonBase64.trim()) {
+    return true;
+  }
+  return false;
+}
+
 /** Map client classification to ExistingBaseline.buildingForm. */
 function existingBuildingForm(
   classification: ExistingBuildingPayload['classification']
@@ -98,6 +120,17 @@ function existingBuildingForm(
     case 'terrace': return 'Terraced';
     default: return 'Unknown';
   }
+}
+
+/** Normalize incoming building form strings to ExistingBaseline buildingForm enum. */
+function normalizeBaselineBuildingForm(input: string): ExistingBaseline['buildingForm'] | undefined {
+  const v = input.trim().toLowerCase();
+  if (v === 'detached') return 'Detached';
+  if (v === 'semi-detached' || v === 'semi_detached' || v === 'semi') return 'Semi-detached';
+  if (v === 'terraced' || v === 'terrace') return 'Terraced';
+  if (v === 'infill') return 'Infill';
+  if (v === 'unknown') return 'Unknown';
+  return undefined;
 }
 
 /** Apply client-provided existingBuilding (selected footprint) to baseline so renderer uses selected, not auto-detected. */
@@ -115,17 +148,72 @@ function applyExistingBuildingToBaseline(
   return null;
 }
 
-/** Resolve seed storeys from single source: new build = brief; extension/renovation = baseline. */
+function proposalStoreysToSeedCount(s: Storeys): StoreyCount {
+  return s === 'one' ? '1' : s === 'two' ? '2' : '3+';
+}
+
+/** Resolve seed storeys: requested storeys in the brief win when set; else baseline for retrofit; else 2. */
 function resolveSeedStoreys(brief: ConceptBrief, baseline: ExistingBaseline | null): StoreyCount {
-  const isNewBuild = brief.proposedDesign.projectType === 'new_build';
-  if (isNewBuild && brief.proposedDesign.storeys) {
-    const s = brief.proposedDesign.storeys;
-    return s === 'one' ? '1' : s === 'two' ? '2' : '3+';
+  const proposed = brief.proposedDesign.storeys;
+  if (proposed) {
+    return proposalStoreysToSeedCount(proposed);
   }
-  if (!isNewBuild && baseline) {
+  const isNewBuild = brief.proposedDesign.projectType === 'new_build';
+  if (isNewBuild) {
+    return '2';
+  }
+  if (baseline) {
     return baseline.storeys === 'Unknown' ? '2' : baseline.storeys;
   }
   return '2';
+}
+
+/**
+ * Align concept seed storeys with explicit brief inputs and site baseline so plan/section/jobs don't
+ * stick to a wrong storey count from a prior axon seed or client seed.
+ */
+function applyDeterministicStoreysToSeed(
+  conceptSeed: ConceptSeedType,
+  conceptBrief: ConceptBrief,
+  resolvedBaseline: ExistingBaseline | null
+): void {
+  const fromProposed = conceptBrief.proposedDesign.storeys;
+  if (fromProposed) {
+    const map: Record<Storeys, StoreyCount> = {
+      one: '1',
+      two: '2',
+      three_plus: '3+',
+    };
+    const mapped = map[fromProposed];
+    if (mapped) {
+      conceptSeed.storeys = mapped;
+      if (conceptSeed.existingBaseline) {
+        conceptSeed.existingBaseline.storeys = mapped;
+      }
+    }
+    return;
+  }
+  if (conceptBrief.proposedDesign.projectType === 'new_build') {
+    return;
+  }
+  if (resolvedBaseline && resolvedBaseline.storeys !== 'Unknown') {
+    const s = resolvedBaseline.storeys;
+    conceptSeed.storeys = s === '1' ? '1' : s === '2' ? '2' : '3+';
+    if (conceptSeed.existingBaseline) {
+      conceptSeed.existingBaseline.storeys = s;
+    }
+  }
+}
+
+/** When locking plan/section to a stored axon seed, only reuse stored storeys if brief/site didn't already fix them. */
+function shouldUseStoredAxonStoreys(
+  conceptBrief: ConceptBrief,
+  resolvedBaseline: ExistingBaseline | null
+): boolean {
+  if (conceptBrief.proposedDesign.storeys !== undefined) return false;
+  const bs = resolvedBaseline?.storeys;
+  if (bs !== undefined && bs !== 'Unknown') return false;
+  return true;
 }
 
 /** Resolve existing baseline when request has site (address/lat/lng). Used before seed load/generate so prompt and seed use same source. */
@@ -163,8 +251,13 @@ async function resolveBaselineIfSite(
     const overrides = siteParams.baselineOverride;
     if (overrides) {
       if (overrides.buildingForm) {
-        baseline.buildingForm = overrides.buildingForm as ExistingBaseline['buildingForm'];
-        baseline.rationale.push(`Building form overridden to ${overrides.buildingForm}`);
+        const normalizedForm = normalizeBaselineBuildingForm(overrides.buildingForm);
+        if (normalizedForm) {
+          baseline.buildingForm = normalizedForm;
+          baseline.rationale.push(`Building form overridden to ${normalizedForm}`);
+        } else {
+          baseline.rationale.push(`Ignored invalid building form override: ${overrides.buildingForm}`);
+        }
       }
       if (overrides.storeys) {
         baseline.storeys = overrides.storeys as ExistingBaseline['storeys'];
@@ -255,11 +348,28 @@ function mapProjectType(input: unknown): ConceptBrief['proposedDesign']['project
 }
 
 function mapStoreys(input: unknown): any {
+  if (typeof input === 'number' && Number.isFinite(input)) {
+    const n = Math.trunc(input);
+    if (n === 1) return 'one';
+    if (n === 2) return 'two';
+    if (n >= 3) return 'three_plus';
+    return undefined;
+  }
   if (typeof input !== 'string') return undefined;
-  const v = input.trim();
-  if (v === '1') return 'one';
-  if (v === '2') return 'two';
-  if (v === '3+') return 'three_plus';
+  const v = input.trim().toLowerCase();
+
+  // Accept numeric, enum-like, and human-readable variants from different clients.
+  if (v === '1' || v === 'one' || v === 'single' || v === 'single_storey' || v === 'single-storey') return 'one';
+  if (v === '2' || v === 'two' || v === 'double' || v === 'double_storey' || v === 'double-storey') return 'two';
+  if (
+    v === '3+' ||
+    v === '3' ||
+    v === 'three' ||
+    v === 'three_plus' ||
+    v === 'three-plus' ||
+    v === 'three_or_more' ||
+    v === 'three-or-more'
+  ) return 'three_plus';
   return undefined;
 }
 
@@ -432,17 +542,21 @@ function conceptBriefFromNewSchema(body: Record<string, unknown>): ConceptBrief 
     footprintScale: typeof proposedAddition.footprintScale === 'string' ? (proposedAddition.footprintScale as any) : undefined,
   };
 
+  const optionalStoreys = mapStoreys(proposedAddition.storeys);
+
   if (projectType === 'new_build') {
-    baseProposed.storeys = mapStoreys(proposedAddition.storeys);
+    baseProposed.storeys = optionalStoreys;
     baseProposed.totalFloorAreaRange = mapFloorAreaRange(proposedAddition.floorAreaRange);
     if (typeof proposedAddition.numberOfPlots === 'string') baseProposed.numberOfPlots = (proposedAddition.numberOfPlots as any);
   } else if (projectType === 'extension') {
     baseProposed.extensionType = mapExtensionType(proposedAddition.extensionType);
     baseProposed.additionalFloorAreaRange = mapFloorAreaRange(proposedAddition.floorAreaRange);
+    if (optionalStoreys) baseProposed.storeys = optionalStoreys;
   } else if (projectType === 'renovation') {
     if (typeof proposedAddition.renovationScope === 'string') {
       baseProposed.renovationScope = proposedAddition.renovationScope as any;
     }
+    if (optionalStoreys) baseProposed.storeys = optionalStoreys;
   }
 
   const brief: ConceptBrief = {
@@ -932,7 +1046,10 @@ export function createServer(): express.Application {
           console.error('[jobs/process] Baseline resolution failed:', err);
         }
 
-        // Load or generate seed (with baseline so prompt matches sync renderer). Prefer client-supplied seed (e.g. from Lovable).
+        // SEED PIPELINE:
+        // - Axonometric: generate a fresh seed and persist it (so downstream plan/section can lock conceptRange + exterior).
+        // - Plan/section jobs tied to an existing axon: generate a fresh seed each time, but lock exterior/massing fields
+        //   to the stored axon seed so interior hints vary without contradicting the axon reference.
         job.progress = 30;
         await storeJob(job, sb);
 
@@ -945,30 +1062,80 @@ export function createServer(): express.Application {
           typeof (jobClientSeed as Record<string, unknown>).roof === 'string';
 
         let conceptSeed: ConceptSeedType | null = jobHasValidClientSeed ? validateAndNormalizeSeed(jobClientSeed) : null;
+
         if (conceptSeed && jobHasValidClientSeed) {
           console.log(`[jobs/process] Using client-supplied concept seed for ${projectId}/${job.conceptId}`);
           conceptBrief.conceptRange = conceptSeed.conceptRange;
-        }
-        if (!conceptSeed) {
-          conceptSeed = await loadConceptSeed(projectId, job.conceptId, sb);
-        }
-        if (conceptSeed) {
-          conceptBrief.conceptRange = conceptSeed.conceptRange;
+
+          // Attach baseline context for prompt consistency. Persist only for axonometric jobs.
           if (conceptSeed.existingBaseline === undefined && resolvedBaseline) {
             conceptSeed.existingBaseline = resolvedBaseline;
             conceptSeed.storeys = resolveSeedStoreys(conceptBrief, resolvedBaseline);
-            await saveConceptSeed(projectId, job.conceptId, conceptSeed, sb);
+            if (job.renderType === 'axonometric') {
+              await saveConceptSeed(projectId, job.conceptId, conceptSeed, sb);
+            }
           }
-        } else {
-          conceptSeed = await generateConceptSeed(conceptBrief, resolvedBaseline ? { existingBaseline: resolvedBaseline } : undefined);
+        }
+
+        if (!conceptSeed) {
+          const shouldLockToStoredSeed =
+            job.renderType === 'floor_plan' || job.renderType === 'section';
+
+          let storedSeedForLocks: ConceptSeedType | null = null;
+          if (shouldLockToStoredSeed) {
+            storedSeedForLocks = await loadConceptSeed(projectId, job.conceptId, sb);
+            if (storedSeedForLocks) {
+              conceptBrief.conceptRange = storedSeedForLocks.conceptRange;
+              console.log(`[jobs/process] Locked conceptRange + exterior for ${projectId}/${job.conceptId} (fresh seed generated)`);
+            }
+          }
+
+          console.log(`[jobs/process] OpenAI responses (seed) START - generateConceptSeed`);
+          const seedStart = Date.now();
+          conceptSeed = await generateConceptSeed(
+            conceptBrief,
+            resolvedBaseline ? { existingBaseline: resolvedBaseline } : undefined
+          );
+          console.log(`[jobs/process] OpenAI responses (seed) OK`, { duration: Date.now() - seedStart });
+          console.log(`[jobs/process] New seed generated with conceptRange: ${conceptSeed.conceptRange}`);
+
+          // Attach baseline context so the prompt's seed JSON matches the resolved site/footprint.
           if (resolvedBaseline) {
             conceptSeed.existingBaseline = resolvedBaseline;
             conceptSeed.storeys = resolveSeedStoreys(conceptBrief, resolvedBaseline);
           } else if (conceptBrief.proposedDesign.projectType !== 'new_build') {
             conceptSeed.storeys = resolveSeedStoreys(conceptBrief, null);
           }
-          await saveConceptSeed(projectId, job.conceptId, conceptSeed, sb);
+
+          // Keep exterior/massing stable for axon consistency; allow interior hints to vary.
+          if (storedSeedForLocks) {
+            conceptSeed.conceptRange = storedSeedForLocks.conceptRange;
+            conceptSeed.footprintShape = storedSeedForLocks.footprintShape;
+            conceptSeed.roof = storedSeedForLocks.roof;
+            conceptSeed.massingMoves = storedSeedForLocks.massingMoves;
+
+            if (shouldUseStoredAxonStoreys(conceptBrief, resolvedBaseline)) {
+              conceptSeed.storeys = storedSeedForLocks.storeys;
+              if (conceptSeed.existingBaseline) {
+                conceptSeed.existingBaseline.storeys = storedSeedForLocks.storeys;
+              }
+            }
+          }
+
+          // Persist only for axonometric jobs; plan/section seeds should vary per job/run.
+          if (job.renderType === 'axonometric') {
+            await saveConceptSeed(projectId, job.conceptId, conceptSeed, sb);
+          }
         }
+
+        if (!conceptSeed) {
+          job.status = 'failed';
+          job.error = 'Failed to load or generate concept seed';
+          await storeJob(job, sb);
+          res.status(500).json({ job });
+          return;
+        }
+        applyDeterministicStoreysToSeed(conceptSeed, conceptBrief, resolvedBaseline);
 
         // Build prompt
         job.progress = 50;
@@ -978,7 +1145,14 @@ export function createServer(): express.Application {
         let referenceAxonBuffer: Buffer | undefined;
         let referenceImageUrl: string | undefined;
 
-        if (requiresExistingConcept) {
+        const attachAxonReferenceJob =
+          requiresExistingConcept && wantsAxonReferenceImage(effectiveRenderType, req.body as Record<string, unknown>);
+        if (requiresExistingConcept && !attachAxonReferenceJob) {
+          console.log(
+            `[jobs/process] ${effectiveRenderType}: brief + seed only (axon reference off). Opt in: useAxonReference or referenceAxonUrl / referenceAxonBase64`
+          );
+        }
+        if (attachAxonReferenceJob) {
           const axonBuffer = await loadRenderedImage(projectId, job.conceptId, 'axonometric', sb);
           if (axonBuffer) {
             referenceAxonBuffer = axonBuffer;
@@ -1449,7 +1623,9 @@ export function createServer(): express.Application {
           console.error('Baseline resolution failed:', err);
         }
 
-        // SEED PIPELINE: Use client-supplied seed (Lovable), load from storage, or generate
+        // SEED PIPELINE: Use client-supplied seed (Lovable) or generate a fresh seed per render.
+        // For plan/section renders tied to an existing axon, we lock massing-related fields to the stored seed
+        // so variation focuses on interior/section hints instead of contradicting the axon reference.
         const clientSeed = req.body?.conceptSeed;
         const hasValidClientSeed =
           clientSeed &&
@@ -1468,39 +1644,63 @@ export function createServer(): express.Application {
         }
 
         if (!conceptSeed) {
-          conceptSeed = await loadConceptSeed(projectId, finalConceptId, sb);
-        }
+          // Only use stored seed for locking (not for reuse) when this render is tied to a prior axon.
+          const shouldLockToStoredSeed =
+            requiresExistingConcept && (renderType === 'floor_plan' || renderType === 'section');
 
-        if (conceptSeed) {
-          // Use existing seed
-          console.log(`Using existing concept seed for ${projectId}/${finalConceptId}`);
-          conceptBrief.conceptRange = conceptSeed.conceptRange;
-          console.log(`Locked to seed's conceptRange: ${conceptSeed.conceptRange}`);
-          if (inputConceptRange && inputConceptRange !== conceptSeed.conceptRange) {
-            console.log(`Input conceptRange '${inputConceptRange}' overridden by seed's locked value '${conceptSeed.conceptRange}'`);
+          let storedSeedForLocks: ConceptSeedType | null = null;
+          if (shouldLockToStoredSeed) {
+            storedSeedForLocks = await loadConceptSeed(projectId, finalConceptId, sb);
+            if (storedSeedForLocks) {
+              conceptBrief.conceptRange = storedSeedForLocks.conceptRange;
+              console.log(`Locked conceptRange + exterior fields for ${projectId}/${finalConceptId} (fresh seed generated)`);
+            }
           }
-          // If seed had no baseline and we now have one, attach and override storeys from single source
-          if (conceptSeed.existingBaseline === undefined && resolvedBaseline) {
-            conceptSeed.existingBaseline = resolvedBaseline;
-            conceptSeed.storeys = resolveSeedStoreys(conceptBrief, resolvedBaseline);
-            await saveConceptSeed(projectId, finalConceptId, conceptSeed, sb);
-            console.log(`existingBaseline and storeys set for ${projectId}/${finalConceptId}`);
-          }
-        } else {
-          // Generate new seed; pass resolved baseline so prompt uses existing storeys from site/footprint
+
+          // Generate a fresh seed for this render (so "render again" changes the seed JSON/prompt inputs).
           console.log(`[RENDER] OpenAI responses (seed) START - generateConceptSeed`);
           const seedStart = Date.now();
           console.log(`Generating new concept seed for ${projectId}/${finalConceptId}`);
-          conceptSeed = await generateConceptSeed(conceptBrief, resolvedBaseline ? { existingBaseline: resolvedBaseline } : undefined);
+          conceptSeed = await generateConceptSeed(
+            conceptBrief,
+            resolvedBaseline ? { existingBaseline: resolvedBaseline } : undefined
+          );
           console.log(`[RENDER] OpenAI responses (seed) OK`, { duration: Date.now() - seedStart });
           console.log(`New seed generated with conceptRange: ${conceptSeed.conceptRange}`);
+
+          // Attach baseline context so the prompt's seed JSON is consistent with the resolved site/footprint.
           if (resolvedBaseline) {
             conceptSeed.existingBaseline = resolvedBaseline;
             conceptSeed.storeys = resolveSeedStoreys(conceptBrief, resolvedBaseline);
           } else if (conceptBrief.proposedDesign.projectType !== 'new_build') {
             conceptSeed.storeys = resolveSeedStoreys(conceptBrief, null);
           }
-          await saveConceptSeed(projectId, finalConceptId, conceptSeed, sb);
+
+          // Lock massing-related fields to stored seed so axon reference remains consistent.
+          if (storedSeedForLocks) {
+            conceptSeed.conceptRange = storedSeedForLocks.conceptRange;
+            conceptSeed.footprintShape = storedSeedForLocks.footprintShape;
+            conceptSeed.roof = storedSeedForLocks.roof;
+            conceptSeed.massingMoves = storedSeedForLocks.massingMoves;
+
+            if (shouldUseStoredAxonStoreys(conceptBrief, resolvedBaseline)) {
+              conceptSeed.storeys = storedSeedForLocks.storeys;
+              if (conceptSeed.existingBaseline) {
+                conceptSeed.existingBaseline.storeys = storedSeedForLocks.storeys;
+              }
+            }
+
+            // If the client supplied conceptRange and it differs from the stored seed,
+            // keep the stored seed's locked value (matches existing behavior).
+            if (inputConceptRange && inputConceptRange !== storedSeedForLocks.conceptRange) {
+              console.log(`Input conceptRange '${inputConceptRange}' overridden by stored seed's locked value '${storedSeedForLocks.conceptRange}'`);
+            }
+          }
+
+          // Persist only axonometric seeds. Plan/section seeds are intentionally ephemeral so they vary per render.
+          if (renderType === 'axonometric') {
+            await saveConceptSeed(projectId, finalConceptId, conceptSeed, sb);
+          }
         }
 
         // Ensure conceptSeed is defined (TypeScript guard + runtime safety)
@@ -1508,30 +1708,21 @@ export function createServer(): express.Application {
           throw new Error('Failed to load or generate concept seed');
         }
 
-        // Deterministic guard: for new-build renders, ensure seed storeys match the request.
-        // Prevents "sticky" 2-storey seeds when the client changes storeys between renders.
-        if (conceptBrief.proposedDesign.projectType === 'new_build' && conceptBrief.proposedDesign.storeys) {
-          const map: Record<typeof conceptBrief.proposedDesign.storeys, StoreyCount> = {
-            one: '1',
-            two: '2',
-            three_plus: '3+',
-          };
-          const mapped = map[conceptBrief.proposedDesign.storeys];
-          if (mapped) conceptSeed.storeys = mapped;
+        applyDeterministicStoreysToSeed(conceptSeed, conceptBrief, resolvedBaseline);
 
-          // Also keep any attached baseline consistent so the prompt's CONCEPT SEED JSON
-          // does not contradict the requested number of storeys.
-          if (conceptSeed.existingBaseline) {
-            conceptSeed.existingBaseline.storeys = mapped;
-          }
-        }
-
-        // AXON REFERENCE: For floor_plan or section, use axon image so prompt and style match test harness.
-        // 1) Prefer buffer from storage (same as test harness); 2) else client-supplied referenceAxonUrl/referenceAxonBase64; 3) else URL from storage (Supabase).
+        // AXON REFERENCE (opt-in): Default is brief + seed only. Set useAxonReference or pass referenceAxonUrl/base64 to match a prior axon.
+        // When opted in: 1) buffer from storage; 2) client URL/base64; 3) public storage URL.
         let referenceAxonBuffer: Buffer | undefined;
         let referenceImageUrl: string | undefined;
 
-        if (requiresExistingConcept) {
+        const attachAxonReference =
+          requiresExistingConcept && wantsAxonReferenceImage(renderType as RenderType, req.body as Record<string, unknown>);
+        if (requiresExistingConcept && !attachAxonReference) {
+          console.log(
+            `[RENDER] ${renderType}: brief + seed only (axon reference off). Opt in: useAxonReference or referenceAxonUrl / referenceAxonBase64`
+          );
+        }
+        if (attachAxonReference) {
           const axonBuffer = await loadRenderedImage(projectId, finalConceptId, 'axonometric', sb);
           if (axonBuffer) {
             referenceAxonBuffer = axonBuffer;

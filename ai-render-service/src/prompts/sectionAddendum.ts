@@ -6,18 +6,50 @@
 
 import type { ConceptSeed } from '../services/generateConceptSeed.js';
 
-export const SECTION_ADDENDUM_VERSION = 'section_addendum_v6';
+export const SECTION_ADDENDUM_VERSION = 'section_addendum_v8';
 
 /**
  * Generates a section-specific addendum that enforces strict vertical section requirements
  * and matches the conceptSeed storeys and roof profile
  * @param conceptSeed - The concept seed for consistency
  * @param includePeople - Whether to allow people in the section view (default: false)
+ * @param hasAxonReference - When false (default), wording assumes no axon image; brief + seed drive geometry
  */
-export function getSectionAddendum(conceptSeed: ConceptSeed, includePeople: boolean = false): string {
+export function getSectionAddendum(
+  conceptSeed: ConceptSeed,
+  includePeople: boolean = false,
+  hasAxonReference: boolean = false
+): string {
   const storeysDescription = getStoreysDescription(conceptSeed.storeys);
   const roofDescription = getRoofDescription(conceptSeed.roof);
   const sectionCutDescription = conceptSeed.sectionCutHint || 'simple vertical cut through building';
+
+  const referenceAndStyleBlock = hasAxonReference
+    ? `AXONOMETRIC REFERENCE (STYLE GUIDE ONLY):
+- Use the axonometric reference to match illustration style and line language, not to exactly trace exterior footprint
+- The axonometric reference is a visual style guide (paper texture, line quality, tonal treatment), not a strict geometric template
+- Should maintain similar storey count and general vertical composition as indicated in the concept seed
+- Do not invent a completely different project type or scale
+
+STYLE CONTINUITY (CRITICAL):
+- Match the same ConstructaOS ink-on-paper style as the axonometric reference
+- Off-white paper
+- Ink lines
+- Subtle grey shading
+- Do NOT switch to blueprint style, CAD style, or technical drawing conventions
+- Maintain the same visual language and aesthetic quality as the axon reference
+- The section should feel like it was drawn by the same hand as the axonometric
+`
+    : `VISUAL STYLE (NO PRIOR AXON IMAGE):
+- No axonometric reference image is supplied; derive section geometry from the concept seed and brief only
+- Use ConstructaOS ink-on-paper: off-white paper, ink lines, subtle grey shading
+- Do NOT switch to blueprint style, CAD style, or technical drawing conventions
+- Restrained, legible early-concept illustration quality
+`;
+
+  const outputClosing = hasAxonReference
+    ? `OUTPUT: A conceptual isometric/axonometric section cutaway in the same ink-on-paper style as the axonometric reference. Simplified, legible, restrained. Angled cutaway view showing floor plates, walls with thickness, and roof profile. Minimal interior elements allowed. Off-white paper, ink lines, subtle grey shading. ${includePeople ? 'Can include minimal line-drawn figures for scale.' : 'No people,'} no labels, no dimensions.`
+    : `OUTPUT: A conceptual isometric/axonometric section cutaway in ConstructaOS ink-on-paper style. Simplified, legible, restrained. Angled cutaway view showing floor plates, walls with thickness, and roof profile. Minimal interior elements allowed. Off-white paper, ink lines, subtle grey shading. ${includePeople ? 'Can include minimal line-drawn figures for scale.' : 'No people,'} no labels, no dimensions.`;
 
   return `ISOMETRIC SECTION CUTAWAY VIEW REQUIREMENTS (CRITICAL):
 
@@ -39,12 +71,7 @@ PRIMARY SOURCE OF TRUTH:
 - The structured inputs and concept seed are the primary source of truth for programme, scale, adjacencies, and spatial intent
 - Use these structured inputs to define the section geometry and vertical composition
 
-AXONOMETRIC REFERENCE (STYLE GUIDE ONLY):
-- Use the axonometric reference to match illustration style and line language, not to exactly trace exterior footprint
-- The axonometric reference is a visual style guide (paper texture, line quality, tonal treatment), not a strict geometric template
-- Should maintain similar storey count and general vertical composition as indicated in the concept seed
-- Do not invent a completely different project type or scale
-
+${referenceAndStyleBlock}
 CUT INSTRUCTION (CRITICAL):
 - Use the sectionCutHint from the concept seed to choose a sensible cut line
 - Section cut guidance: ${sectionCutDescription}
@@ -58,15 +85,6 @@ VERTICAL CONSTRAINTS (MUST MATCH CONCEPT SEED):
 CONCEPT BOUNDARIES:
 - Should feel consistent with the same concept (programme, scale, adjacency), but does not need to match exterior massing exactly
 - Do not invent a completely different project type or scale
-
-STYLE CONTINUITY (CRITICAL):
-- Match the same ConstructaOS ink-on-paper style as the axonometric reference
-- Off-white paper
-- Ink lines
-- Subtle grey shading
-- Do NOT switch to blueprint style, CAD style, or technical drawing conventions
-- Maintain the same visual language and aesthetic quality as the axon reference
-- The section should feel like it was drawn by the same hand as the axonometric
 
 CONTENT RESTRICTIONS (ABSOLUTE):
 - Focus on floor plates, walls, and roof profile - architectural structure
@@ -86,7 +104,7 @@ GEOMETRIC REPRESENTATION:
 - Can include minimal landscape/ground context if appropriate (trees, garden)
 - Can use slightly thicker lines for cut elements (restrained architectural convention)
 
-OUTPUT: A conceptual isometric/axonometric section cutaway in the same ink-on-paper style as the axonometric reference. Simplified, legible, restrained. Angled cutaway view showing floor plates, walls with thickness, and roof profile. Minimal interior elements allowed. Off-white paper, ink lines, subtle grey shading. ${includePeople ? 'Can include minimal line-drawn figures for scale.' : 'No people,'} no labels, no dimensions.`;
+${outputClosing}`;
 }
 
 function getStoreysDescription(storeys: ConceptSeed['storeys']): string {
@@ -96,7 +114,7 @@ function getStoreysDescription(storeys: ConceptSeed['storeys']): string {
     case '2':
       return 'Two storeys - ground floor and first floor, show two floor plates';
     case '3+':
-      return 'Three or more storeys - show multiple floor plates representing all levels';
+      return 'Three or more storeys — show a floor plate for each level, including loft/attic; if the third level is attic/loft within the roof, use an open cutaway so that level is visible (not a solid roof hiding the top floor)';
     default:
       return 'Storey count as specified in brief';
   }

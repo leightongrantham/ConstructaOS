@@ -633,28 +633,36 @@ export function createServer(): express.Application {
         // Generate conceptId if not provided (only for axonometric)
         const finalConceptId = conceptId && typeof conceptId === 'string' ? conceptId : randomUUID();
 
-        // SEED PIPELINE: Load or generate concept seed
-        let conceptSeed = await loadConceptSeed(projectId, finalConceptId);
-        
-        if (conceptSeed) {
-          // Use existing seed
-          console.log(`Using existing concept seed for ${projectId}/${finalConceptId}`);
+        // SEED PIPELINE:
+        // - Axonometric renders: generate a fresh seed and store it.
+        // - Plan/section renders: generate a fresh seed each render run, but lock massing-related fields
+        //   to the stored seed so the axon correlation stays coherent (zoning/section hints can vary).
+        const storedConceptSeed = await loadConceptSeed(projectId, finalConceptId);
+
+        let conceptSeed = null as Awaited<ReturnType<typeof loadConceptSeed>>;
+
+        if (renderType === 'axonometric') {
+          console.log(`Generating new concept seed for ${projectId}/${finalConceptId}`);
+          conceptSeed = await generateConceptSeed(conceptBrief);
+          await saveConceptSeed(projectId, finalConceptId, conceptSeed);
         } else {
           // For plan/section, seed MUST exist (return 409 if missing)
-          if (requiresExistingConcept) {
+          if (!storedConceptSeed) {
             res.status(409).json({
               error: 'SEED_REQUIRED',
               message: 'Concept seed missing. Regenerate concept.',
             });
             return;
           }
-          
-          // Generate new seed (only for axonometric)
-          console.log(`Generating new concept seed for ${projectId}/${finalConceptId}`);
+
+          console.log(`Generating fresh plan/section seed variation for ${projectId}/${finalConceptId}`);
           conceptSeed = await generateConceptSeed(conceptBrief);
-          
-          // Store the seed for reuse
-          await saveConceptSeed(projectId, finalConceptId, conceptSeed);
+
+          // Lock massing-related fields to the stored seed; let interior/section hints vary.
+          conceptSeed.footprintShape = storedConceptSeed.footprintShape;
+          conceptSeed.storeys = storedConceptSeed.storeys;
+          conceptSeed.roof = storedConceptSeed.roof;
+          conceptSeed.massingMoves = storedConceptSeed.massingMoves;
         }
 
         // Deterministic guard: for new-build renders, ensure the seed storeys match the request.
