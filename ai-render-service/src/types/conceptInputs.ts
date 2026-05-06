@@ -161,6 +161,8 @@ export type OutputType =
  */
 export interface ExistingContext {
   buildingForm?: BuildingForm; // Existing building form (optional when address/baseline supplies it)
+  /** Existing / original dwelling storey count (extensions & renovations — do not confuse with proposal). */
+  storeys?: Storeys;
   orientation?: Orientation;
   density?: Density;
 }
@@ -201,6 +203,8 @@ export interface NewBuildProposedDesign extends BaseProposedDesign {
 export interface ExtensionProposedDesign extends BaseProposedDesign {
   projectType: 'extension';
   extensionType: ExtensionType; // Type of extension
+  /** Storey height of the new extension volume (optional; inferred from extensionType single/two storey when omitted). */
+  storeysAdded?: Storeys;
   additionalFloorAreaRange: FloorAreaRange; // Additional floor area from extension
 }
 
@@ -292,7 +296,12 @@ export function conceptBriefToLegacyInputs(brief: ConceptBrief): ConceptInputs {
     outputType: proposedDesign.outputType,
   };
 
-  if (proposedDesign.storeys !== undefined) {
+  if (
+    proposedDesign.projectType === 'extension' &&
+    existingContext?.storeys !== undefined
+  ) {
+    result.storeys = existingContext.storeys;
+  } else if (proposedDesign.storeys !== undefined) {
     result.storeys = proposedDesign.storeys;
   }
   if (proposedDesign.numberOfPlots !== undefined) {
@@ -339,7 +348,7 @@ export function legacyInputsToConceptBrief(inputs: ConceptInputs): ConceptBrief 
     outputType: inputs.outputType,
   };
 
-  if (inputs.storeys !== undefined) {
+  if (inputs.storeys !== undefined && inputs.projectType !== 'extension') {
     baseFields.storeys = inputs.storeys;
   }
   if (inputs.numberOfPlots !== undefined) {
@@ -400,6 +409,10 @@ export function legacyInputsToConceptBrief(inputs: ConceptInputs): ConceptBrief 
   }
   if (inputs.density) {
     existingContext.density = inputs.density;
+  }
+  // Extension: storey count on legacy inputs refers to the original building, not the extension volume.
+  if (inputs.projectType === 'extension' && inputs.storeys !== undefined) {
+    existingContext.storeys = inputs.storeys;
   }
 
   return {

@@ -2,7 +2,8 @@
   "framework": null,
   "functions": {
     "api/**/*.ts": {
-      "maxDuration": 120
+      "maxDuration": 120,
+      "includeFiles": "public/**"
     }
   },
   "rewrites": [
@@ -51,8 +52,20 @@
       "destination": "/api/health"
     },
     {
+      "source": "/",
+      "destination": "/api/ui"
+    },
+    {
+      "source": "/index.html",
+      "destination": "/api/ui"
+    },
+    {
+      "source": "/site-lookup-demo.js",
+      "destination": "/api/serve-site-lookup-demo"
+    },
+    {
       "source": "/((?!api/).*)",
-      "destination": "/index.html"
+      "destination": "/api/ui"
     }
   ]
 }

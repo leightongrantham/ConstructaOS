@@ -40,6 +40,15 @@ export interface RenderRequest {
   site?: SiteInput;
 }
 
+/** Temporary storey pipeline inspection (omit from production docs when removed). */
+export interface ApiStoreysDebugResponse {
+  projectType: string;
+  storeysInput: Record<string, unknown>;
+  existingContext: unknown;
+  proposal: unknown;
+  finalStoreysUsed: string;
+}
+
 export interface RenderResponse {
   conceptId: string;
   renderType: RenderType;
@@ -53,6 +62,8 @@ export interface RenderResponse {
   conceptRange: ConceptRange; // For debugging
   /** Concept seed used for this render. Returned so the client (e.g. Lovable) can cache and send it back on the next request for consistent plan/section. */
   conceptSeed?: ConceptSeed;
+  /** Debug: storey normalization snapshot (temporary). */
+  storeysDebug?: ApiStoreysDebugResponse;
 }
 
 export interface RenderResult {

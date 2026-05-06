@@ -4,7 +4,7 @@
  * Focuses exclusively on isometric/axonometric cutaway floor plans
  */
 
-import type { ConceptBrief } from '../types/conceptInputs.js';
+import type { ConceptBrief, Storeys } from '../types/conceptInputs.js';
 import type { ConceptSeed } from '../services/generateConceptSeed.js';
 import { conceptRangeAddendum } from './conceptRangeAddendum.js';
 import {
@@ -136,12 +136,15 @@ export function buildIsometricPlanPrompt(args: BuildIsometricPlanPromptArgs): st
       interventionParts.push(`Existing building: ${formDisplay}`);
     }
     const requestedStoreys = proposedDesign.storeys;
-    const renovationStoreys = requestedStoreys
-      ? formatStoreys(requestedStoreys)
-      : hasExistingBaseline
-        ? formatBaselineStoreys(existingBaseline.storeys)
+    const fabricStoreysEstimate = hasExistingBaseline
+      ? formatBaselineStoreys(existingBaseline.storeys)
+      : existingContext?.storeys !== undefined
+        ? formatStoreys(existingContext.storeys)
         : '~2 (estimated, no survey)';
-    interventionParts.push(`Existing storeys: ${renovationStoreys}`);
+    const renovationStoreys =
+      requestedStoreys !== undefined ? formatStoreys(requestedStoreys) : fabricStoreysEstimate;
+    interventionParts.push(`Maintain ${fabricStoreysEstimate} storeys unless explicitly changed.`);
+    interventionParts.push(`Effective storey massing target for this image: ${renovationStoreys} storeys.`);
     if (!hasExistingBaseline && requestedStoreys) {
       interventionParts.push(
         `STRICT REQUIREMENT: The existing building MUST have ${formatStoreys(requestedStoreys)} storeys/levels (use the client request as the source of truth when no baseline is available).`
@@ -149,7 +152,7 @@ export function buildIsometricPlanPrompt(args: BuildIsometricPlanPromptArgs): st
     }
     if (
       isThreePlusStoreyForPrompt(
-        requestedStoreys,
+        requestedStoreys ?? existingContext?.storeys,
         hasExistingBaseline ? existingBaseline.storeys : undefined
       )
     ) {
@@ -171,6 +174,9 @@ export function buildIsometricPlanPrompt(args: BuildIsometricPlanPromptArgs): st
       interventionParts.push(`Building form: ${formatBuildingForm(proposedDesign.buildingForm)}`);
     }
     if (proposedDesign.storeys) {
+      interventionParts.push(
+        `Design a building with ${formatStoreys(proposedDesign.storeys)} storeys (total across the new massing).`
+      );
       interventionParts.push(`Number of storeys: ${formatStoreys(proposedDesign.storeys)}`);
       interventionParts.push(
         `STRICT REQUIREMENT: The rendered building MUST have ${formatStoreys(
@@ -212,24 +218,40 @@ export function buildIsometricPlanPrompt(args: BuildIsometricPlanPromptArgs): st
     if (proposedDesign.buildingForm && existingFormForExt !== undefined && proposedDesign.buildingForm !== existingFormForExt) {
       interventionParts.push(`Proposed building form: ${formatBuildingForm(proposedDesign.buildingForm)}`);
     }
-    if (hasExistingBaseline || proposedDesign.storeys) {
-      if (proposedDesign.storeys !== undefined) {
-        interventionParts.push(`Existing building storeys: ${formatStoreys(proposedDesign.storeys)}`);
-      } else if (existingBaseline) {
-        interventionParts.push(`Existing building storeys: ${formatBaselineStoreys(existingBaseline.storeys)}`);
-      }
+    const fabricExistingStoreysEnum = existingContext?.storeys;
+    const existingPrincipalLabel =
+      fabricExistingStoreysEnum !== undefined
+        ? formatStoreys(fabricExistingStoreysEnum)
+        : hasExistingBaseline && existingBaseline
+          ? formatBaselineStoreys(existingBaseline.storeys)
+          : null;
+    if (existingPrincipalLabel != null && String(existingPrincipalLabel).trim() !== '') {
+      interventionParts.push(
+        `Existing building is ${existingPrincipalLabel} storeys. Add extension without modifying the original principal structure; only attach the new volume according to positioning rules below.`
+      );
     }
+
+    const extAdditionIso =
+      proposedDesign.storeysAdded !== undefined
+        ? proposedDesign.storeysAdded
+        : proposedDesign.extensionType === 'two_storey'
+          ? ('two' as Storeys)
+          : proposedDesign.extensionType === 'single_storey'
+            ? ('one' as Storeys)
+            : undefined;
+    if (extAdditionIso !== undefined) {
+      interventionParts.push(
+        `Extension storey height for the NEW volume only: ${formatStoreys(extAdditionIso)} storeys.`
+      );
+    }
+
     if (
       isThreePlusStoreyForPrompt(
-        proposedDesign.storeys,
+        fabricExistingStoreysEnum,
         hasExistingBaseline ? existingBaseline.storeys : undefined
       )
     ) {
       interventionParts.push(THIRD_STOREY_ATTIC_GUIDANCE);
-    }
-    const extStoreys = proposedDesign.extensionType === 'two_storey' ? '2' : proposedDesign.extensionType === 'single_storey' ? '1' : null;
-    if (extStoreys) {
-      interventionParts.push(`Extension volume: ${extStoreys} storey${extStoreys === '1' ? '' : 's'}`);
     }
     if (proposedDesign.numberOfPlots) {
       interventionParts.push(`Number of plots: ${formatNumberOfPlots(proposedDesign.numberOfPlots)}`);

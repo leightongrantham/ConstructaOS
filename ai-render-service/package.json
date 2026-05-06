@@ -2,19 +2,20 @@
   "name": "ai-render-service",
   "version": "1.0.0",
   "description": "AI render service",
-  "main": "dist/index.js",
   "type": "module",
   "engines": {
     "node": "20.x"
   },
   "scripts": {
-    "build": "npm run lint:deprecated && tsc",
+    "clean": "rm -rf dist",
+    "build": "npm run lint:deprecated && node scripts/ensure-demo-bundle.js && npm run clean && tsc",
     "build:demo": "vite build",
-    "start": "node dist/index.js",
-    "dev": "tsx src/index.ts",
+    "start": "node dist/runStandalone.js",
+    "dev": "tsx src/runStandalone.ts",
     "type-check": "tsc --noEmit",
     "test:local": "tsx test/runLocalRender.ts",
     "test:sanity": "tsx test/sanity-check.ts",
+    "test:storeys": "tsx test/storeys-pipeline-validation.ts",
     "lint:deprecated": "node scripts/lint-deprecated.js"
   },
   "keywords": [],
